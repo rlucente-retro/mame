@@ -1,3 +1,26 @@
+> [!NOTE]
+> For the Wildbits Jr2 technical reference and architecture specification, see [WILDBITS_JR2_ARCHITECTURE.md](WILDBITS_JR2_ARCHITECTURE.md).
+>
+> **Build FEU ROMs & Place in `roms/wbjr2/`:**
+> ```bash
+> make -C $NITROS9DIR/recipes/wildbits/feu PLATFORM=jr2
+> mkdir -p roms/wbjr2 && cp $NITROS9DIR/recipes/wildbits/feu/{booter,f0.dsk} roms/wbjr2/
+> ```
+>
+> **Build NitrOS-9 Level 2 SD Image:**
+> ```bash
+> make -C $NITROS9DIR/recipes/wildbits/l2 PLATFORM=jr2
+> ```
+>
+> **Launch Emulator:**
+> ```bash
+> # Standalone FEU (Flash disk)
+> ./mame wbjr2
+>
+> # NitrOS-9 Level 2 (SD card)
+> ./mame wbjr2 -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+> ```
+
 # MAME
 
 ## What is MAME?
