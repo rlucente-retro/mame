@@ -3,6 +3,7 @@
 >
 > **Build FEU ROMs & Place in `roms/wbjr2/`:**
 > ```bash
+> export NITROS9DIR=/path/to/nitros9
 > make -C $NITROS9DIR/recipes/wildbits/feu PLATFORM=jr2
 > mkdir -p roms/wbjr2 && cp $NITROS9DIR/recipes/wildbits/feu/{booter,f0.dsk} roms/wbjr2/
 > ```
