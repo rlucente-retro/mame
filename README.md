@@ -21,10 +21,10 @@
 > **Launch Emulator:**
 > ```bash
 > # Standalone FEU (Flash disk)
-> ./mame wbjr2 -window
+> ./mame wbjr2 -window -skip_gameinfo
 >
 > # NitrOS-9 Level 2 (SD card)
-> ./mame wbjr2 -window -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+> ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
 
 # MAME
