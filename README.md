@@ -1,6 +1,11 @@
 > [!NOTE]
 > For the Wildbits Jr2 technical reference and architecture specification, see [WILDBITS_JR2_ARCHITECTURE.md](WILDBITS_JR2_ARCHITECTURE.md).
 >
+> **Build MAME (Wildbits Jr2):**
+> ```bash
+> make SOURCES=src/mame/wildbits/wildbits_jr2.cpp
+> ```
+>
 > **Build FEU ROMs & Place in `roms/wbjr2/`:**
 > ```bash
 > export NITROS9DIR=/path/to/nitros9
