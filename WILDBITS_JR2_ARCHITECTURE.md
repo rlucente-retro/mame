@@ -474,27 +474,25 @@ The emulation has been directly verified against the physical WIZnet WizFi360 ha
 A critical architectural distinction between physical FPGA hardware and discrete software emulators occurs in high-frequency interrupt scheduling:
 
 #### 1. Physical Hardware Timing:
-* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match 115200 baud), the timer reaches compare match every $2185 \div 4 = \mathbf{546\text{ CPU cycles}}$ at 6.29 MHz ($11,520\text{ ticks/sec}$).
-* **Continuous Hardware Concurrency:** On real silicon, the 6809 CPU and FPGA timer operate concurrently in continuous physical time. The NitrOS-9 ISR (`iService`) executes $\approx 220\text{ cycles}$ to poll the FIFO, clears `INT_PENDING_0` ($FE20), and returns via `RTI`. The CPU is physically guaranteed $326\text{ clean cycles}$ of user instruction execution before the next flip-flop transition.
+* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match 115200 baud), the timer reaches compare match every $2185 \div 4 = \mathbf{546\text{ CPU cycles}}$ at 6.29 MHz ($11,521.7\text{ ticks/sec}$).
+* **Continuous Hardware Concurrency:** On real silicon, the 6809 CPU and FPGA timer operate concurrently in continuous physical time. The NitrOS-9 ISR (`iService`) executes $\approx 220\text{ cycles}$ to poll the FIFO, clears `INT_PENDING_0` ($FE20), and returns via `RTI`. The CPU is physically guaranteed $\approx 326\text{ clean cycles}$ of user instruction execution between timer events.
 
-#### 2. The Emulated Timeslice Backlog & Interrupt Starvation Cascade:
-* **Discrete Timeslice Scheduling:** Software emulators like MAME execute CPU instructions in discrete slices rather than continuous nanoseconds.
-* **Interrupt Overhead vs. Period:** 6809 interrupt entry (12-byte register push), vector fetch from `$FFF8`, OS-9 kernel `F$IRQ` table lookup, `iService` execution, and `RTI` require $\approx 220-260\text{ CPU cycles}$. At $546\text{ cycles/tick}$, IRQ processing consumes nearly $50\%$ of total CPU throughput.
-* **The Starvation Cascade:** When a command like `echo AT>/wz` writes to `/wz`, the WizFi module generates a response (`\r\nOK\r\n`) into the hardware FIFO. Because `echo` only opens the device for write, no process reads the FIFO. In `iService`, `vpr_stat` is set and unread data remains in the FIFO. If the emulator fires Timer 0 at the raw 11.52 kHz rate, any slight scheduler backlog or multi-cycle instruction burst causes the timer to expire repeatedly. Every `RTI` immediately encounters an already-expired timer event, trapping the CPU in a continuous `IRQ` $\rightarrow$ `ISR` $\rightarrow$ `RTI` loop. This completely starves foreground processes (the Shell) and drops PS/2 keyboard events.
+#### 2. The Startup Race Condition & PR #392 Resolution:
+* **Root Cause of Early Boot IRQ Storms:** In earlier versions of `wizfi.asm`, `Init` enabled `T0_CTR` and unmasked `INT_TIMER_0` *before* calling `F$IRQ` and *before* initializing the indirect register pointers (`ind_CtrlReg`, `ind_DataReg`, etc.). At 11.52 kHz (one tick every 86.8 microseconds), the 6809 took a hardware interrupt before initialization completed, jumping into `iService` with NULL pointers (`[$0000]`) and causing an immediate IRQ storm/hang before reaching the shell.
+* **PR #392 Fixes:**
+  1. **Deferred Unmasking:** `INT_TIMER_0` is unmasked only at the very end of `Init`, after all structures, descriptors, and indirect pointers are fully established.
+  2. **Clean Carry Return:** `iExit` explicitly forces the stacked `CC` Carry flag clear (`anda #^Carry`) so that kernel `XIRQ` / `DoneIRQ` recognizes the interrupt was serviced and never masks user-mode interrupts (`I=1`) on running processes.
+  3. **Status Acknowledgment:** `ClearTimer0` reads `>T0_STAT` to acknowledge the hardware compare flag before clearing `INT_PENDING_0`.
 
-#### 3. Emulation Timing Workaround & Fidelity Analysis:
-* **1 kHz Scheduling Period Floor:** In MAME's `timer0_tick` and `timer_w`, Timer 0 compare intervals are clamped to a minimum period of **1 ms (1 kHz maximum frequency)**:
+#### 3. Native 11.52 kHz Emulation Fidelity:
+* **Un-Clamped Hardware Accurate Timing:** With PR #392 incorporated in NitrOS-9, MAME executes Timer 0 at its exact physical hardware frequency:
   ```cpp
   attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
-  if (period < attotime::from_hz(1000))
-      period = attotime::from_hz(1000);
   m_timer0->adjust(period);
   ```
 * **Fidelity Impact:**
   * **Registers & Protocol:** All hardware registers (`$FE30-$FE37`, `$FF20-$FF29`), compare registers, status flags (`T0_STAT`), and interrupt pending bits operate identically to physical hardware.
-  * **Throughput & Responsiveness:** 1,000 polls per second provides sub-millisecond response latency for all AT commands and Wi-Fi packets while reducing CPU polling overhead from $\approx 50\%$ to $\approx 2\%$.
-  * **System Health:** Boots reliably through `startup` (`iniz wz`), cleanly executes shell commands, and ensures interactive typing remains 100% responsive.
-* **Clean State Machine:** Removed all artificial, out-of-band `set_irq` calls from FIFO pushing and socket reading routines; `INT_TIMER_0` is driven strictly by the Timer 0 compare engine.
+  * **System Health:** Boots cleanly through `startup` (`iniz wz`), maintains 100% responsiveness during interactive typing at the shell, and accurately matches the physical Wildbits Jr2 execution rate.
 
 ---
 
