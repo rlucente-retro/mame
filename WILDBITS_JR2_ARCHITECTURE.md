@@ -25,21 +25,21 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
 ```
 
 ### Key Specifications
-* **CPU:** Motorola 6809 soft core (FNX6809, Big Endian) running inside a Xilinx Artix-7 FPGA (XC7A35T), clocked at 6.29 MHz (1/4th of the 25.175 MHz video dot clock oscillator; configured in MAME via `XTAL(25'175'000)` with internal $\div 4$).
+* **CPU:** Motorola 6809 soft core (FNX6809, Big Endian) running inside a Xilinx Artix-7 FPGA (XC7A35T), clocked at 6.29 MHz (1/4th of the 25.175 MHz video dot clock oscillator; configured in MAME via `XTAL(25'175'000)` with internal ÷ 4).
 * **System Bus:** 21-bit physical address bus addressing up to 2 MB of physical address space.
 * **CPU Address Space:** 16-bit (64 KB) paged into eight 8 KB slots via 4 hardware Look-Up Tables (MLUTs).
 * **System RAM:** 512 KB onboard high-speed SRAM (Physical Blocks `$00 - $3F`, physical `0x000000 - 0x07FFFF`).
 * **Flash ROM:** 512 KB onboard non-volatile Flash ROM (Physical Blocks `$40 - $7F`, physical `0x080000 - 0x0FFFFF`). Contains the Level 1 First Execution Unit (FEU), Flash disk `/f0`, and bootloader.
-* **Video Controller:** **TinyVicky II** outputting DVI/VGA at 60 Hz ($640\times 480$ text, $320\times 240$ graphics) or 70 Hz ($640\times 400$ text, $320\times 200$ graphics).
+* **Video Controller:** **TinyVicky II** outputting DVI/VGA at 60 Hz (640 × 480 text, 320 × 240 graphics) or 70 Hz (640 × 400 text, 320 × 200 graphics).
 * **Graphics Engines:** 
-  * Character text matrix ($80\times 30$, $80\times 60$, $40\times 30$, or $40\times 60$) with dual font sets (2 KB each) and per-cell foreground/background palette attributes.
-  * 3 full-screen 256-color bitmapped planes ($320\times 200$ or $320\times 240$).
-  * 3 hardware scrolling tilemap layers supporting $8\times 8$ or $16\times 16$ tiles across 8 concurrent tile sets.
-  * 64 hardware sprites ($8\times 8$, $16\times 16$, $24\times 24$, or $32\times 32$) with 4 display layers.
+  * Character text matrix (80 × 30, 80 × 60, 40 × 30, or 40 × 60) with dual font sets (2 KB each) and per-cell foreground/background palette attributes.
+  * 3 full-screen 256-color bitmapped planes (320 × 200 or 320 × 240).
+  * 3 hardware scrolling tilemap layers supporting 8 × 8 or 16 × 16 tiles across 8 concurrent tile sets.
+  * 64 hardware sprites (8 × 8, 16 × 16, 24 × 24, or 32 × 32) with 4 display layers.
   * 4 graphics Color Look-Up Tables (CLUTs), each with 256 24-bit RGB colors.
   * Dedicated text Foreground and Background Color Look-Up Tables (16 colors each).
   * Hardware Gamma correction look-up tables (Red, Green, Blue).
-  * Hardware grayscale mouse cursor ($16\times 16$).
+  * Hardware grayscale mouse cursor (16 × 16).
 * **Audio Subsystem:**
   * Dual **SN76489** Programmable Sound Generators (PSGs) emulated in FPGA (stereo or mono 8-voice mode).
   * Dual **MOS 6581 / 8580** Sound Interface Devices (SIDs) (6 analog/synth voices with filters).
@@ -57,7 +57,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
   * USB-C debug & flash programming interface (FTDI FT4232H bridge).
 * **Hardware Acceleration:**
   * Direct Memory Access (DMA) engine supporting 1D linear fill/copy and 2D rectangular block copy/fill with programmable source/destination strides.
-  * Hardware Integer Math Coprocessor ($16\times 16\to 32$-bit unsigned multiplication, $32/16\to 16$-bit unsigned division/remainder, and 32-bit addition).
+  * Hardware Integer Math Coprocessor (16 × 16 → 32-bit unsigned multiplication, 32 / 16 → 16-bit unsigned division/remainder, and 32-bit addition).
 
 ---
 
@@ -77,7 +77,7 @@ The 21-bit physical address bus maps the following resources:
 #### Dedicated Video & Audio Physical Blocks:
 * **Block `$C0` (`0x180000`):** TinyVicky registers, Gamma correction tables, Mouse cursor bitmap, Sprite registers, and Text Mode CLUTs (FG CLUT at `$1700`, BG CLUT at `$1740`).
 * **Block `$C1` (`0x182000`):** Font Set 0 (`$0000-$07FF`), Font Set 1 (`$0800-$0FFF`), Graphics CLUTs 0–3 (`$1000–$1FFF`).
-* **Block `$C2` (`0x184000`):** Text Matrix character memory (80 columns $\times$ 60 rows = 4,800 bytes).
+* **Block `$C2` (`0x184000`):** Text Matrix character memory (80 columns × 60 rows = 4,800 bytes).
 * **Block `$C3` (`0x186000`):** Text Matrix color attribute memory (High nibble = Foreground palette index 0..15, Low nibble = Background palette index 0..15).
 * **Block `$C4` (`0x188000`):** Audio Synthesizer registers: SID Left (`$0000`), SID Right (`$0080`), PSG Left (`$0200`), PSG Right (`$0208`).
 
@@ -139,7 +139,7 @@ $FFA8 - $FFAF: MMU Slot Mapping Registers (when EDIT_EN = 1)
 | **`$FE08 - $FE09`** | `PCBID0..1` (R) | ASCII PCB ID ("B0") |
 | **`$FE0A - $FE0F`** | `CHIP_VER` (R) | TinyVicky BCD version and chip numbers |
 | **`$FE10 - $FE13`** | `OKB` (R/W) | Optical Keyboard Registers (K2 model) |
-| **`$FE20 - $FE2F`** | `INTC` (R/W) | **Interrupt Controller (4 Groups $\times$ 4 Registers):**<br>• `$FE20-$FE23`: `PENDING_0..3` (R: active, W: clear)<br>• `$FE24-$FE27`: `POLARITY_0..3`<br>• `$FE28-$FE2B`: `EDGE_0..3`<br>• `$FE2C-$FE2F`: `MASK_0..3` (1 = masked, 0 = enabled) |
+| **`$FE20 - $FE2F`** | `INTC` (R/W) | **Interrupt Controller (4 Groups × 4 Registers):**<br>• `$FE20-$FE23`: `PENDING_0..3` (R: active, W: clear)<br>• `$FE24-$FE27`: `POLARITY_0..3`<br>• `$FE28-$FE2B`: `EDGE_0..3`<br>• `$FE2C-$FE2F`: `MASK_0..3` (1 = masked, 0 = enabled) |
 | **`$FE30 - $FE37`** | `TIMER0` (R/W) | **24-bit Timer 0 (25.175 MHz Dot Clock):**<br>• `$FE30`: `T0_CTR` (W: `[3:UP, 2:LD, 1:CLR, 0:EN]`) / `T0_STAT` (R: `[0:EQ]`)<br>• `$FE31-$FE33`: `T0_VAL` (24-bit value low/mid/high)<br>• `$FE34`: `T0_CMP_CTR` (`[1:RELD, 0:RECLR]`)<br>• `$FE35-$FE37`: `T0_CMP` (24-bit target compare value) |
 | **`$FE38 - $FE3F`** | `TIMER1` (R/W) | **24-bit Timer 1 (Frame/VBLANK Clock):**<br>• `$FE38`: `T1_CTR` / `T1_STAT`<br>• `$FE39-$FE3B`: `T1_VAL` (24-bit)<br>• `$FE3C`: `T1_CMP_CTR`<br>• `$FE3D-$FE3F`: `T1_CMP` (24-bit) |
 | **`$FE40 - $FE4F`** | `RTC` (R/W) | **bq4802 Real-Time Clock:**<br>Seconds, Minutes, Hours, Day, DOW, Month, Year, Century, Alarms, Rates, Enables, Flags, Control (`UTI`, `STOP`, `12/24`, `DSE`) |
@@ -151,7 +151,7 @@ $FFA8 - $FFAF: MMU Slot Mapping Registers (when EDIT_EN = 1)
 | **`$FEA0 - $FEA8`** | `MOUSE` (R/W) | **Hardware Mouse Cursor:**<br>• `$FEA0`: `MS_MEN` (`[1:MODE, 0:ENABLE]`)<br>• `$FEA2-$FEA3`: `MS_X` (16-bit X position)<br>• `$FEA4-$FEA5`: `MS_Y` (16-bit Y position)<br>• `$FEA6-$FEA8`: `PS2_BYTE_0..2` |
 | **`$FEB0 - $FEBF`** | `VIA0` (R/W) | **WDC 65C22 VIA 0:**<br>`IORB`, `IORA`, `DDRB`, `DDRA`, `T1CL/H`, `T1LL/H`, `T2CL/H`, `SR`, `ACR`, `PCR`, `IFR`, `IER`, `IORA2` |
 | **`$FEC0 - $FED7`** | `DMA` (R/W) | **TinyVicky DMA Controller:**<br>• `$FEC0`: `DMA_CTRL` (`[7:START, 3:INT_EN, 2:FILL, 1:2D, 0:ENABLE]`)<br>• `$FEC1`: `DMA_STATUS` (R: `BUSY`) / `DMA_DATA_2_WRITE` (W: Fill byte)<br>• `$FEC4-$FEC6`: 24-bit Source Address (`SA_H`, `SA_M`, `SA_L`)<br>• `$FEC8-$FECA`: 24-bit Dest Address (`DA_H`, `DA_M`, `DA_L`)<br>• `$FECD-$FECF`: 24-bit 1D Size (`DZ_L`, `DZ_M`, `DZ_H`)<br>• `$FED0-$FED3`: 2D Size (`WIDTH_H/L`, `HEIGHT_H/L`)<br>• `$FED4-$FED7`: 2D Strides (`SRC_STRIDE_H/L`, `DST_STRIDE_H/L`) |
-| **`$FEE0 - $FEFB`** | `MATH` (R/W) | **Hardware Integer Math Coprocessor:**<br>• `$FEE0-$FEE3`: `MULU_A_H/L`, `MULU_B_H/L` $\to$ `$FEF0-$FEF3`: `MULU_HH/HL/LH/LL` ($16\times 16\to 32$-bit)<br>• `$FEE4-$FEE7`: `DIVU_DEN_H/L`, `DIVU_NUM_H/L` $\to$ `$FEF4-$FEF5`: `QUOU_H/L`, `$FEF6-$FEF7`: `REMU_H/L` ($32/16\to 16$-bit)<br>• `$FEE8-$FEEF`: `ADD_A_HH..LL`, `ADD_B_HH..LL` $\to$ `$FEF8-$FEFB`: `ADD_R_HH..LL` (32-bit Add) |
+| **`$FEE0 - $FEFB`** | `MATH` (R/W) | **Hardware Integer Math Coprocessor:**<br>• `$FEE0-$FEE3`: `MULU_A_H/L`, `MULU_B_H/L` → `$FEF0-$FEF3`: `MULU_HH/HL/LH/LL` (16 × 16 → 32-bit)<br>• `$FEE4-$FEE7`: `DIVU_DEN_H/L`, `DIVU_NUM_H/L` → `$FEF4-$FEF5`: `QUOU_H/L`, `$FEF6-$FEF7`: `REMU_H/L` (32 / 16 → 16-bit)<br>• `$FEE8-$FEEF`: `ADD_A_HH..LL`, `ADD_B_HH..LL` → `$FEF8-$FEFB`: `ADD_R_HH..LL` (32-bit Add) |
 | **`$FF00 - $FF01`** | `SDC1` (R/W) | **Internal SPI SD Card Port 1:** Status/Control, Data |
 | **`$FF20 - $FF29`** | `WIZFI` (R/W) | **WizFi360 Hardware FIFO Bridge:**<br>• `$FF20`: `CtrlReg` (`[3:TxEmpty, 2:RxEmpty, 1:Reset, 0:Rate]`)<br>• `$FF21`: `DataReg` (TX push / RX pop)<br>• `$FF22-$FF23`: `RxD_RD_Cnt` (16-bit)<br>• `$FF24-$FF25`: `RxD_WR_Cnt` (16-bit Available RX Bytes)<br>• `$FF26-$FF27`: `TxD_RD_Cnt` (16-bit)<br>• `$FF28-$FF29`: `TxD_WR_Cnt` (16-bit) |
 | **`$FF30 - $FF35`** | `SAM2695` (R/W)| **SAM2695 MIDI Synth Interface:**<br>• `$FF30`: Status (`[2:Tx_empty, 1:Rx_empty]`)<br>• `$FF31`: FIFO Data Port<br>• `$FF32-$FF33`: `RXD_COUNT_LOW/HI`<br>• `$FF34-$FF35`: `TXD_COUNT_LOW/HI` |
@@ -175,7 +175,7 @@ TinyVicky II text mode geometry is governed by **Master Control Register 1 (`$FF
   * When `DBL_X = 1`: **40 columns** ($640 / 16$).
   * When `DBL_X = 0`: **80 columns** ($640 / 8$).
 * **Bit 0 (`CLK_70` = `$01`):** Selects 70Hz refresh rate (400 vertical scanlines) instead of standard 60Hz (480 scanlines).
-* **Hardware Default:** On boot, the system initializes to **80 columns $\times$ 30 rows** (`DBL_Y = 1`, `DBL_X = 0`, `m_vky_mstr_ctrl_1 = 0x04`).
+* **Hardware Default:** On boot, the system initializes to **80 columns × 30 rows** (`DBL_Y = 1`, `DBL_X = 0`, `m_vky_mstr_ctrl_1 = 0x04`).
 
 ### 4.2 Text Color Palette Architecture
 
@@ -270,7 +270,7 @@ The onboard 512KB Flash ROM (`0x080000 - 0x0FFFFF`, Physical Blocks `$40 - $7F`)
 
 | FEU Component | Filename | Size | Flash Blocks (8KB) | Physical Blocks | Flash Offset | Function |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`/f0` Flash Disk** | `f0.dsk` | 40 KB (5 blocks) | `$38, $39, $3A, $3B, $3C` | `$78, $79, $7A, $7B, $7C` | `0x70000 - 0x79FFF` | RBF filesystem (10 tracks $\times$ 16 sectors) containing `/f0/feu/startup`, utilities, and `pick` menu. |
+| **`/f0` Flash Disk** | `f0.dsk` | 40 KB (5 blocks) | `$38, $39, $3A, $3B, $3C` | `$78, $79, $7A, $7B, $7C` | `0x70000 - 0x79FFF` | RBF filesystem (10 tracks × 16 sectors) containing `/f0/feu/startup`, utilities, and `pick` menu. |
 | **FEU Booter** | `booter` | 24 KB (3 blocks) | `$3D, $3E, $3F` | `$7D, $7E, $7F` | `0x7A000 - 0x7FFFF` | Level 1 Kernel (`krn`, `krnp2`, `init`), drivers (`vtio`, `keydrv_ps2`, `rbmem`, `llwbsd`), `sysgo`, and reset vector trampoline (`$FFF0`). |
 
 #### Building the FEU ROM Set:
@@ -344,10 +344,10 @@ The Level 2 driver `wizfi.asm` initializes the network interface during `iniz wz
 1. **Timer Configuration:** Configures Hardware Timer 0 at 11.52 kHz (`TRATE = 2185` cycles on 25.175 MHz clock), enables `INT_TIMER_0`, and unmasks `INT_WIFI`.
 2. **AT Synchronization Sequence:**
    * Asserts and releases reset via `$FF20`.
-   * Sends `AT\r\n` $\to$ expects `OK\r\n`.
-   * Sends `ATE0\r\n` (echo off) $\to$ expects `OK\r\n`.
-   * Sends `AT+CWMODE=1\r\n` (station mode) $\to$ expects `OK\r\n`.
-   * Sends `AT+CIPMUX=1\r\n` (multi-connection mode) $\to$ expects `OK\r\n`.
+   * Sends `AT\r\n` → expects `OK\r\n`.
+   * Sends `ATE0\r\n` (echo off) → expects `OK\r\n`.
+   * Sends `AT+CWMODE=1\r\n` (station mode) → expects `OK\r\n`.
+   * Sends `AT+CIPMUX=1\r\n` (multi-connection mode) → expects `OK\r\n`.
 3. **Polling & Service Loop (`iService`):**
    * On Timer 0 ticks, `iService` calls `RxFCheck` to read `$FF24-$FF25`.
    * If bytes are available, it reads data from `$FF21`, parses AT command responses, and manages network channels (0..4) for TCP/UDP and DriveWire.
@@ -371,21 +371,21 @@ graph LR
 2. **AT State Machine Engine (Implemented & Verified):**
    * Buffers incoming TX strings until `\r` or `\n`.
    * Automatically generates responses to AT initialization queries:
-     * `AT` $\to$ `\r\nOK\r\n`
-     * `AT+GMR` $\to$ `\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n`
-     * `AT+CIPSTATUS` $\to$ `\r\nSTATUS:5\r\n\r\nOK\r\n`
+     * `AT` → `\r\nOK\r\n`
+     * `AT+GMR` → `\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n`
+     * `AT+CIPSTATUS` → `\r\nSTATUS:5\r\n\r\nOK\r\n`
    * Enables NitrOS-9 `iniz wz` / `startup` to initialize seamlessly without stalling.
 
 3. **Socket Bridge & Network Applications (Planned Extension):**
    * Support extended AT networking commands:
-     * `AT+CWMODE=...` $\to$ `\r\nOK\r\n`
-     * `AT+CWJAP_CUR?` / `AT+CWJAP=...` $\to$ `\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n`
-     * `AT+CIFSR` $\to$ return virtual station IP (`+CIFSR:STAIP,"192.168.1.100"\r\n\r\nOK\r\n`)
-     * `AT+CIPMUX=...` $\to$ `\r\nOK\r\n`
-     * `AT+CIPSTART=<link_id>,"TCP",<ip>,<port>` $\to$ establish host TCP socket connection.
-     * `AT+CIPSEND=<link_id>,<len>` $\to$ enter raw data pass-through mode and stream bytes over socket.
-     * `AT+CIPCLOSE=<link_id>` $\to$ close socket connection.
-     * Incoming socket data $\to$ emit `\r\n+IPD,<link_id>,<len>:<data>` into RX FIFO.
+     * `AT+CWMODE=...` → `\r\nOK\r\n`
+     * `AT+CWJAP_CUR?` / `AT+CWJAP=...` → `\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n`
+     * `AT+CIFSR` → return virtual station IP (`+CIFSR:STAIP,"192.168.1.100"\r\n\r\nOK\r\n`)
+     * `AT+CIPMUX=...` → `\r\nOK\r\n`
+     * `AT+CIPSTART=<link_id>,"TCP",<ip>,<port>` → establish host TCP socket connection.
+     * `AT+CIPSEND=<link_id>,<len>` → enter raw data pass-through mode and stream bytes over socket.
+     * `AT+CIPCLOSE=<link_id>` → close socket connection.
+     * Incoming socket data → emit `\r\n+IPD,<link_id>,<len>:<data>` into RX FIFO.
 
 4. **DriveWire Over Wi-Fi (DWoW) (Planned Extension):**
    * Allow connection to host DriveWire server (e.g. `pyDriveWire` running on `localhost:65504`) to enable virtual floppy drives, DriveWire printers, and networking.
@@ -400,7 +400,7 @@ graph LR
 | **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`) | **Completed & Verified** |
 | **Flash ROM & FEU** | Full 64KB FEU (`f0.dsk` @ `$70000`, `booter` @ `$7A000`) | **Completed & Verified** (Standalone Level 1 boot) |
 | **SPI SD Card** | SDC0 shift register, MISO/MOSI, SDHC image boot | **Completed & Verified** (Level 2 boot from `/s0`) |
-| **Interrupt Controller**| 4 Groups $\times$ 8 sources, dynamic masking & polarity | **Completed & Verified** |
+| **Interrupt Controller**| 4 Groups × 8 sources, dynamic masking & polarity | **Completed & Verified** |
 | **24-bit Timers** | Timer 0 (25.175 MHz dot clock) and Timer 1 (Frame) | **Completed & Verified** |
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
