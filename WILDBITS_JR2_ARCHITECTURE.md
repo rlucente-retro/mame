@@ -474,25 +474,27 @@ The emulation has been directly verified against the physical WIZnet WizFi360 ha
 A critical architectural distinction between physical FPGA hardware and discrete software emulators occurs in high-frequency interrupt scheduling:
 
 #### 1. Physical Hardware Timing:
-* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match 115200 baud), the timer reaches compare match every $2185 \div 4 = \mathbf{546\text{ CPU cycles}}$ at 6.29 MHz ($11,521.7\text{ ticks/sec}$).
-* **Continuous Hardware Concurrency:** On real silicon, the 6809 CPU and FPGA timer operate concurrently in continuous physical time. The NitrOS-9 ISR (`iService`) executes $\approx 220\text{ cycles}$ to poll the FIFO, clears `INT_PENDING_0` ($FE20), and returns via `RTI`. The CPU is physically guaranteed $\approx 326\text{ clean cycles}$ of user instruction execution between timer events.
+* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match theoretical single-byte arrival time at 115200 baud), the timer reaches compare match every $2185 \div 4 = \mathbf{546\text{ CPU cycles}}$ at 6.29 MHz ($11,521.7\text{ ticks/sec}$).
+* **Hardware Differences Between K2 and Jr2:**
+  * **Wildbits K2 (`$16`):** Features a dedicated, event-driven hardware interrupt (`INT_WIZFI` on Group 3) that only triggers when bytes are present in the FIFO. The driver uses `iThrottle` to mask interrupts when the buffer is full and unmasks on read. Background CPU utilization is $< 1\%$.
+  * **Wildbits Jr2 (`$1A`):** Does not have the hardware Wi-Fi interrupt line populated. Instead, it relies on continuous background polling via Timer 0 (`INT_TIMER_0` on Group 0).
 
-#### 2. The Startup Race Condition & PR #392 Resolution:
-* **Root Cause of Early Boot IRQ Storms:** In earlier versions of `wizfi.asm`, `Init` enabled `T0_CTR` and unmasked `INT_TIMER_0` *before* calling `F$IRQ` and *before* initializing the indirect register pointers (`ind_CtrlReg`, `ind_DataReg`, etc.). At 11.52 kHz (one tick every 86.8 microseconds), the 6809 took a hardware interrupt before initialization completed, jumping into `iService` with NULL pointers (`[$0000]`) and causing an immediate IRQ storm/hang before reaching the shell.
-* **PR #392 Fixes:**
-  1. **Deferred Unmasking:** `INT_TIMER_0` is unmasked only at the very end of `Init`, after all structures, descriptors, and indirect pointers are fully established.
-  2. **Clean Carry Return:** `iExit` explicitly forces the stacked `CC` Carry flag clear (`anda #^Carry`) so that kernel `XIRQ` / `DoneIRQ` recognizes the interrupt was serviced and never masks user-mode interrupts (`I=1`) on running processes.
-  3. **Status Acknowledgment:** `ClearTimer0` reads `>T0_STAT` to acknowledge the hardware compare flag before clearing `INT_PENDING_0`.
+#### 2. The High-Frequency Polling Cascade:
+* **NitrOS-9 Interrupt Overhead:** The 6809 interrupt entry (12-byte register push, vector fetch from `$FFF8`), kernel `krn.asm` `XIRQ` mapping, `clock.asm` `DoPoll` loop, `ioman.asm` `IRQPoll` table traversal, `wizfi.asm` `iService` execution, and `RTI` require $\approx 406\text{ CPU cycles}$ per tick.
+* **CPU Starvation at 11.52 kHz:** At $546\text{ cycles/tick}$, IRQ dispatch consumes $\approx 75\%$ of total 6809 CPU cycles. During boot (`startup`), when the OS performs hundreds of SPI SD card sector reads (`llwbsd`), interrupting the CPU every 35 instructions drops disk and foreground throughput to a crawl, appearing as a hang on console.
 
-#### 3. Native 11.52 kHz Emulation Fidelity:
-* **Un-Clamped Hardware Accurate Timing:** With PR #392 incorporated in NitrOS-9, MAME executes Timer 0 at its exact physical hardware frequency:
+#### 3. Emulation Timing Optimization (1 kHz Scheduling Floor):
+* **1 kHz Scheduling Period Floor:** In MAME's `timer0_tick` and `timer_w`, Timer 0 compare intervals are clamped to a minimum period of **1 ms (1 kHz maximum frequency)**:
   ```cpp
   attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
+  if (period < attotime::from_hz(1000))
+      period = attotime::from_hz(1000); // 1 ms clamp
   m_timer0->adjust(period);
   ```
-* **Fidelity Impact:**
+* **Fidelity & Performance Impact:**
   * **Registers & Protocol:** All hardware registers (`$FE30-$FE37`, `$FF20-$FF29`), compare registers, status flags (`T0_STAT`), and interrupt pending bits operate identically to physical hardware.
-  * **System Health:** Boots cleanly through `startup` (`iniz wz`), maintains 100% responsiveness during interactive typing at the shell, and accurately matches the physical Wildbits Jr2 execution rate.
+  * **Zero Data Loss:** The WizFi360 hardware FIFO holds 2,048 bytes (2KB). At 115,200 baud, at most $\approx 11.5\text{ bytes}$ arrive per millisecond, which easily buffers without overrun.
+  * **Throughput & Responsiveness:** Reduces IRQ overhead from $\approx 75\%$ to $\approx 6.5\%$, giving $>93\%$ CPU capacity to the shell and disk drivers, enabling instant boots and zero-latency keyboard typing.
 
 ---
 

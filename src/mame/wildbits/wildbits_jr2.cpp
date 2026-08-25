@@ -587,6 +587,8 @@ TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer0_tick)
 	if (m_t0_cmp > 0 && (m_t0_ctr & 0x01))
 	{
 		attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
+		if (period < attotime::from_hz(1000))
+			period = attotime::from_hz(1000);
 		m_timer0->adjust(period);
 	}
 }
@@ -647,6 +649,8 @@ void wildbits_jr2_state::timer_w(offs_t offset, uint8_t data)
 			if (m_t0_cmp > 0)
 			{
 				attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
+				if (period < attotime::from_hz(1000))
+					period = attotime::from_hz(1000);
 				m_timer0->adjust(period);
 			}
 		}
