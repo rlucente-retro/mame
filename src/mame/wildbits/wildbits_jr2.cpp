@@ -828,7 +828,6 @@ void wildbits_jr2_state::push_wizfi_response(const std::string &resp)
 		if (m_wizfi_rx_fifo.size() < 2048)
 			m_wizfi_rx_fifo.push((uint8_t)c);
 	}
-	set_irq(3, 0x01);
 	set_irq(0, 0x10);
 }
 
@@ -889,7 +888,6 @@ void wildbits_jr2_state::poll_wizfi_socket()
 					m_wizfi_rx_fifo.push(rx_buf[i]);
 			}
 		}
-		set_irq(3, 0x01);
 		set_irq(0, 0x10);
 	}
 }
