@@ -16,6 +16,7 @@
 > **Build NitrOS-9 Level 2 SD Image:**
 > ```bash
 > make -C $NITROS9DIR/recipes/wildbits/l2 PLATFORM=jr2
+> truncate -s 4M $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
 >
 > **Launch Emulator:**
