@@ -395,7 +395,7 @@ graph LR
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
 | **PS/2 Keyboard** | Host matrix mapped to PS/2 Set 2 scan codes (make/break) | **Completed & Verified** (Interactive typing) |
-| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Socket Bridge | *Planned (Detailed specification above)* |
+| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Socket Bridge | **Completed & Verified** (Registers `$FF20-$FF29`, FIFO buffering, and AT engine for NitrOS-9 initialization) |
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) | *Planned* |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
 | **TinyVicky Sprites** | 64 hardware sprites with 4 composite layers | *Planned* |

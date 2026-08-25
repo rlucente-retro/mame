@@ -293,6 +293,11 @@ private:
 	uint8_t m_sdc_data_out;
 	int m_sdcard_miso;
 
+	// WizFi360 State
+	std::queue<uint8_t> m_wizfi_rx_fifo;
+	std::string m_wizfi_tx_buf;
+	uint8_t m_wizfi_ctrl;
+
 	// TinyVicky Master Registers
 	uint8_t m_vky_mstr_ctrl_0;
 	uint8_t m_vky_mstr_ctrl_1;
@@ -555,7 +560,12 @@ void wildbits_jr2_state::intc_w(offs_t offset, uint8_t data)
 TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer0_tick)
 {
 	m_t0_stat |= 0x01; // Compare match status
-	set_irq(0, 0x10);  // INT_TIMER_0 (Bit 4 of Group 0)
+
+	// If WizFi has incoming bytes or periodically (60Hz), assert INT_TIMER_0
+	if (!m_wizfi_rx_fifo.empty() || m_t0_cmp > 10000 || (m_frame_count % 4 == 0))
+	{
+		set_irq(0, 0x10);  // INT_TIMER_0 (Bit 4 of Group 0)
+	}
 
 	if (m_t0_cmp > 0 && (m_t0_ctr & 0x01))
 	{
@@ -791,14 +801,71 @@ uint8_t wildbits_jr2_state::wizfi_r(offs_t offset)
 {
 	switch (offset)
 	{
-	case 0x00: return 0x0c; // WizFi.TxEmpty | WizFi.RxEmpty (0x08 | 0x04)
+	case 0x00: {
+		uint8_t ctrl = m_wizfi_ctrl & 0x03;
+		if (m_wizfi_tx_buf.empty()) ctrl |= 0x08; // TxEmpty
+		if (m_wizfi_rx_fifo.empty()) ctrl |= 0x04; // RxEmpty
+		return ctrl;
+	}
+	case 0x01: {
+		if (!m_wizfi_rx_fifo.empty())
+		{
+			uint8_t b = m_wizfi_rx_fifo.front();
+			m_wizfi_rx_fifo.pop();
+			return b;
+		}
+		return 0x00;
+	}
+	case 0x02: return 0x00; // Rx RD cnt hi
+	case 0x03: return 0x00; // Rx RD cnt lo
+	case 0x04: return (m_wizfi_rx_fifo.size() >> 8) & 0xff; // Rx WR cnt hi (available bytes)
+	case 0x05: return m_wizfi_rx_fifo.size() & 0xff;        // Rx WR cnt lo
+	case 0x06: return 0x00; // Tx RD cnt hi
+	case 0x07: return 0x00; // Tx RD cnt lo
+	case 0x08: return 0x00; // Tx WR cnt hi
+	case 0x09: return m_wizfi_tx_buf.length() & 0xff;       // Tx WR cnt lo
 	default: return 0x00;
 	}
 }
 
 void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 {
-	// Stub write
+	switch (offset)
+	{
+	case 0x00:
+		m_wizfi_ctrl = data;
+		if (data & 0x02) // Reset
+		{
+			while (!m_wizfi_rx_fifo.empty()) m_wizfi_rx_fifo.pop();
+			m_wizfi_tx_buf.clear();
+		}
+		break;
+	case 0x01:
+		if (data == '\r' || data == '\n')
+		{
+			if (!m_wizfi_tx_buf.empty())
+			{
+				std::string cmd = m_wizfi_tx_buf;
+				m_wizfi_tx_buf.clear();
+				std::string resp = "\r\nOK\r\n";
+				if (cmd.rfind("AT+GMR", 0) == 0)
+					resp = "\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n";
+				else if (cmd.rfind("AT+CIPSTATUS", 0) == 0)
+					resp = "\r\nSTATUS:5\r\n\r\nOK\r\n";
+				for (char c : resp)
+				{
+					m_wizfi_rx_fifo.push((uint8_t)c);
+				}
+				set_irq(0, 0x10);
+				set_irq(3, 0x01);
+			}
+		}
+		else
+		{
+			m_wizfi_tx_buf += (char)data;
+		}
+		break;
+	}
 }
 
 // TinyVicky Master Registers ($FFC0 - $FFDF)
@@ -1207,6 +1274,11 @@ void wildbits_jr2_state::machine_reset()
 	m_sdc_data_out = 0xff;
 	m_sdcard_miso = 1;
 
+	// Reset WizFi360
+	m_wizfi_ctrl = 0;
+	m_wizfi_tx_buf.clear();
+	while (!m_wizfi_rx_fifo.empty()) m_wizfi_rx_fifo.pop();
+
 	// Initialize Video Master defaults: Text Mode enabled (640x480, 80x30)
 	m_vky_mstr_ctrl_0 = 0x01; // TEXT enabled
 	m_vky_mstr_ctrl_1 = 0x04; // 60Hz mode, DBL_Y enabled (80x30 default), Font 0
@@ -1280,8 +1352,8 @@ void wildbits_jr2_state::device_stop()
 
 void wildbits_jr2_state::wbjr2(machine_config &config)
 {
-	// 6809 CPU clocked at 6.29 MHz
-	MC6809(config, m_maincpu, XTAL(14'318'181) / 2);
+	// 6809 CPU clocked at 6.29 MHz (25.175 MHz / 4)
+	MC6809(config, m_maincpu, XTAL(25'175'000));
 	m_maincpu->set_addrmap(AS_PROGRAM, &wildbits_jr2_state::wbjr2_mem);
 
 	// SPI SD Card Controller

@@ -27,7 +27,7 @@
 > ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
 >
-> **Level 2 Boot Tip:** If the Level 2 boot appears to pause after displaying the system banner, press the <kbd>ESC</kbd> key. The default `startup` script attempts to initialize the WizFi360 Wi-Fi module (`iniz wz`), which is not yet emulated; pressing <kbd>ESC</kbd> aborts the script and immediately presents the interactive shell prompt (`{TERM|02}/dd:`).
+> **Keyboard Input in MAME:** To toggle between MAME UI controls and direct keyboard input for the terminal/shell, press <kbd>Fn</kbd> + <kbd>Delete</kbd> (on Mac) or <kbd>Forward Delete</kbd> / <kbd>Scroll Lock</kbd> (on PC) until MAME displays *UI controls disabled*.
 
 # MAME
 
