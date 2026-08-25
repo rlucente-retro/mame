@@ -1044,32 +1044,26 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 	}
 	else if (cmd_upper.rfind("AT+GMR", 0) == 0)
 	{
-		push_wizfi_response("\r\nAT version:1.0.4.0(May 22 2020 03:03:00)\r\nSDK version:3.2.0(a10b42f)\r\ncompile time:May 22 2020 03:03:00\r\n\r\nOK\r\n");
+		push_wizfi_response("\r\nAT version:1.1.2.0(Apr 12 2023 08:08:36)\r\nSDK version:3.2.0(a0ffff9f)\r\ncompile time:Apr 12 2023 08:08:36\r\n\r\nOK\r\n");
 	}
 	else if (cmd_upper.rfind("AT+RST", 0) == 0)
 	{
 		reset_wizfi();
-		push_wizfi_response("\r\nOK\r\n\r\nready\r\n");
+		push_wizfi_response("\r\nOK\r\n\r\nready\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n");
 	}
 	else if (cmd_upper.rfind("AT+UART", 0) == 0)
 	{
 		if (cmd.find('?') != std::string::npos)
 		{
 			std::string tag = (cmd_upper.find("_DEF") != std::string::npos) ? "+UART_DEF" : "+UART_CUR";
-			push_wizfi_response(util::string_format("\r\n%s:115200,8,1,0,0\r\n\r\nOK\r\n", tag.c_str()));
+			push_wizfi_response(util::string_format("\r\n%s:115200,8,1,0,0\r\nOK\r\n", tag.c_str()));
 		}
 		else
 		{
 			push_wizfi_response("\r\nOK\r\n");
 		}
 	}
-	else if (cmd_upper.rfind("AT+SYSSTORE", 0) == 0)
-	{
-		if (cmd.find('?') != std::string::npos)
-			push_wizfi_response("\r\n+SYSSTORE:1\r\n\r\nOK\r\n");
-		else
-			push_wizfi_response("\r\nOK\r\n");
-	}
+
 	else if (cmd_upper.rfind("AT+CWMODE", 0) == 0)
 	{
 		if (cmd.find('?') != std::string::npos)
@@ -1092,7 +1086,7 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 		{
 			std::string tag = (cmd_upper.find("_DEF") != std::string::npos) ? "+CWDHCP_DEF" :
 			                  (cmd_upper.find("_CUR") != std::string::npos) ? "+CWDHCP_CUR" : "+CWDHCP";
-			push_wizfi_response(util::string_format("\r\n%s:3\r\n\r\nOK\r\n", tag.c_str()));
+			push_wizfi_response(util::string_format("\r\n%s:3\r\nOK\r\n", tag.c_str()));
 		}
 		else
 		{
@@ -1105,7 +1099,7 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 		{
 			std::string tag = (cmd_upper.find("_DEF") != std::string::npos) ? "+CWJAP_DEF" :
 			                  (cmd_upper.find("_CUR") != std::string::npos) ? "+CWJAP_CUR" : "+CWJAP";
-			push_wizfi_response(util::string_format("\r\n%s:\"WildbitsNet\",\"00:11:22:33:44:55\",1,-50\r\n\r\nOK\r\n", tag.c_str()));
+			push_wizfi_response(util::string_format("\r\n%s:\"WildbitsNet\",\"00:08:dc:6b:e3:36\",1,-50\r\n\r\nOK\r\n", tag.c_str()));
 		}
 		else
 		{
@@ -1120,9 +1114,9 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 	}
 	else if (cmd_upper.rfind("AT+CWLAP", 0) == 0)
 	{
-		push_wizfi_response("\r\n+CWLAP:(4,\"WildbitsNet\",-50,\"00:11:22:33:44:55\",1,0)\r\n\r\nOK\r\n");
+		push_wizfi_response("\r\n+CWLAP:(4,\"WildbitsNet\",-50,\"00:08:dc:6b:e3:36\",1,0)\r\n\r\nOK\r\n");
 	}
-	else if (cmd_upper.rfind("AT+CIPSTA", 0) == 0)
+	else if (cmd_upper.rfind("AT+CIPSTA", 0) == 0 && cmd_upper.find("MAC") == std::string::npos)
 	{
 		if (cmd.find('?') != std::string::npos)
 		{
@@ -1136,9 +1130,35 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 			push_wizfi_response("\r\nOK\r\n");
 		}
 	}
+	else if (cmd_upper.rfind("AT+CIPSTAMAC", 0) == 0)
+	{
+		if (cmd.find('?') != std::string::npos)
+		{
+			std::string tag = (cmd_upper.find("_DEF") != std::string::npos) ? "+CIPSTAMAC_DEF" :
+			                  (cmd_upper.find("_CUR") != std::string::npos) ? "+CIPSTAMAC_CUR" : "+CIPSTAMAC";
+			push_wizfi_response(util::string_format("\r\n%s:\"00:08:dc:6b:e3:36\"\r\n\r\nOK\r\n", tag.c_str()));
+		}
+		else
+		{
+			push_wizfi_response("\r\nOK\r\n");
+		}
+	}
+	else if (cmd_upper.rfind("AT+CIPAPMAC", 0) == 0)
+	{
+		if (cmd.find('?') != std::string::npos)
+		{
+			std::string tag = (cmd_upper.find("_DEF") != std::string::npos) ? "+CIPAPMAC_DEF" :
+			                  (cmd_upper.find("_CUR") != std::string::npos) ? "+CIPAPMAC_CUR" : "+CIPAPMAC";
+			push_wizfi_response(util::string_format("\r\n%s:\"02:08:dc:6b:e3:36\"\r\n\r\nOK\r\n", tag.c_str()));
+		}
+		else
+		{
+			push_wizfi_response("\r\nOK\r\n");
+		}
+	}
 	else if (cmd_upper.rfind("AT+CIFSR", 0) == 0)
 	{
-		push_wizfi_response("\r\n+CIFSR:STAIP,\"192.168.1.100\"\r\n+CIFSR:STAMAC,\"00:08:dc:11:22:33\"\r\n\r\nOK\r\n");
+		push_wizfi_response("\r\n+CIFSR:STAIP,\"192.168.1.100\"\r\n+CIFSR:STAMAC,\"00:08:dc:6b:e3:36\"\r\n\r\nOK\r\n");
 	}
 	else if (cmd_upper.rfind("AT+CIPMUX", 0) == 0)
 	{
@@ -1318,7 +1338,7 @@ void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 		}
 		else if (was_in_reset && !now_in_reset)
 		{
-			push_wizfi_response("\r\nready\r\n");
+			push_wizfi_response("\r\nready\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n");
 		}
 		break;
 	}
