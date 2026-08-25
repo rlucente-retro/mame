@@ -344,7 +344,7 @@ The WizFi360 interface is utilized across multiple software layers in NitrOS-9 L
 
 1. **Driver Initialization (`iniz wz` / `startup`):**
    * Configures Timer 0 at 11.52 kHz (`TRATE = 2185` cycles on 25.175 MHz dot clock) and unmasks `INT_TIMER_0`.
-   * Pulses hardware reset via `$FF20`, synchronizes with `AT\r\n` $\rightarrow$ `OK\r\n`, disables echo (`ATE0`), sets station mode (`AT+CWMODE=1`), and enables multi-connection mode (`AT+CIPMUX=1`).
+   * Pulses hardware reset via `$FF20`, synchronizes with `AT\r\n` → `OK\r\n`, disables echo (`ATE0`), sets station mode (`AT+CWMODE=1`), and enables multi-connection mode (`AT+CIPMUX=1`).
 2. **Wi-Fi Router Configuration (`SCRIPTS/wizcon`):**
    * Configures persistent station parameters (`AT+CWMODE_DEF=1`, `AT+CWDHCP_DEF=1,1`, `AT+CWJAP_DEF="ssid","pass"`).
    * Verifies IP assignment via `AT+CIPSTA_CUR?`.
@@ -405,7 +405,7 @@ graph TD
 ```
 
 #### Strategic Dual-Layer Networking Design:
-* **Pre-Configured NVRAM State (Out-of-the-Box Operation):** On physical hardware, once Wi-Fi credentials have been saved to flash via `AT+CWJAP_DEF`, the WizFi360 retains them across reboots and automatically joins the network on power-up. MAME emulates this by booting with `m_wizfi_wifi_connected = true` and emitting the authentic auto-connect sequence (`ready` $\rightarrow$ `WIFI CONNECTED` $\rightarrow$ `WIFI GOT IP`), allowing drivers and networking tools to function immediately.
+* **Pre-Configured NVRAM State (Out-of-the-Box Operation):** On physical hardware, once Wi-Fi credentials have been saved to flash via `AT+CWJAP_DEF`, the WizFi360 retains them across reboots and automatically joins the network on power-up. MAME emulates this by booting with `m_wizfi_wifi_connected = true` and emitting the authentic auto-connect sequence (`ready` → `WIFI CONNECTED` → `WIFI GOT IP`), allowing drivers and networking tools to function immediately.
 * **Full Dynamic Reconfigurability:** The emulator fully executes all configuration commands (`AT+CWJAP_DEF`, `AT+CWMODE_DEF`, `AT+CWDHCP_DEF`, `AT+CWQAP`), updating the active SSID and network state dynamically.
 * **Transparent Host Socket Bridging:** When TCP/UDP connections are opened (`AT+CIPSTART`), MAME creates non-blocking sockets using its native `osd_file` TCP abstraction (`socket.host:port`), seamlessly connecting to host FujiNet servers (`192.168.1.100:65504` or `127.0.0.1:65504`) and remote internet hosts.
 
@@ -434,13 +434,13 @@ The emulation has been directly verified against the physical WIZnet WizFi360 ha
      OK
      ```
 3. **Query Response Formatting (`_CUR`, `_DEF`, standard):**
-   * `AT+UART_CUR?` / `AT+UART_DEF?` $\rightarrow$ `+UART_CUR:115200,8,1,0,0\r\nOK\r\n` (no extra blank line).
-   * `AT+CWMODE_DEF?` $\rightarrow$ `+CWMODE_DEF:1\r\n\r\nOK\r\n`.
-   * `AT+CWDHCP_DEF?` $\rightarrow$ `+CWDHCP_DEF:3\r\nOK\r\n`.
-   * `AT+CIPMUX?` $\rightarrow$ `+CIPMUX:0\r\n\r\nOK\r\n`.
-   * `AT+CIPMODE?` $\rightarrow$ `+CIPMODE:0\r\n\r\nOK\r\n`.
-   * `AT+SYSSTORE?` $\rightarrow$ `ERROR\r\n` (unsupported command on WizFi360 W600 firmware).
-4. **Hardware Reset Transition (`$FF20` Bit 1: $1 \rightarrow 0$) and `AT+RST`:**
+   * `AT+UART_CUR?` / `AT+UART_DEF?` → `+UART_CUR:115200,8,1,0,0\r\nOK\r\n` (no extra blank line).
+   * `AT+CWMODE_DEF?` → `+CWMODE_DEF:1\r\n\r\nOK\r\n`.
+   * `AT+CWDHCP_DEF?` → `+CWDHCP_DEF:3\r\nOK\r\n`.
+   * `AT+CIPMUX?` → `+CIPMUX:0\r\n\r\nOK\r\n`.
+   * `AT+CIPMODE?` → `+CIPMODE:0\r\n\r\nOK\r\n`.
+   * `AT+SYSSTORE?` → `ERROR\r\n` (unsupported command on WizFi360 W600 firmware).
+4. **Hardware Reset Transition (`$FF20` Bit 1: 1 → 0) and `AT+RST`:**
    * Emits the power-on auto-connect sequence:
      ```text
      ready
@@ -457,14 +457,14 @@ The emulation has been directly verified against the physical WIZnet WizFi360 ha
 ### 7.6 Transparent Streaming, `+++` Escape, & Packet Framing
 
 1. **Transparent Transmission Mode (`CIPMODE=1` & `AT+CIPSEND`):**
-   * Initiated via `AT+CIPSEND` $\rightarrow$ prompts with `\r\nOK\r\n\r\n> `.
+   * Initiated via `AT+CIPSEND` → prompts with `\r\nOK\r\n\r\n> `.
    * Subsequent writes to `$FF21` stream directly to the open host socket without AT buffering.
    * Incoming socket bytes are pushed raw into `m_wizfi_rx_fifo`.
 2. **`+++` Escape Sequence Detection:**
    * Detects 3 consecutive `+` characters with quiet guard delays.
    * Switches from transparent data streaming back to command mode without severing the TCP session.
 3. **Normal Mode Packet Framing (`CIPMODE=0`):**
-   * `AT+CIPSEND=<len>` $\rightarrow$ prompts with `\r\nOK\r\n> `, buffers `<len>` bytes, and confirms with `\r\nRecv <len> bytes\r\n\r\nSEND OK\r\n`.
+   * `AT+CIPSEND=<len>` → prompts with `\r\nOK\r\n> `, buffers `<len>` bytes, and confirms with `\r\nRecv <len> bytes\r\n\r\nSEND OK\r\n`.
    * Incoming data from socket is formatted as `\r\n+IPD,<link_id>,<len>:<data>` (or `\r\n+IPD,<len>:<data>` for single mode).
 
 ---
@@ -474,14 +474,14 @@ The emulation has been directly verified against the physical WIZnet WizFi360 ha
 A critical architectural distinction between physical FPGA hardware and discrete software emulators occurs in high-frequency interrupt scheduling:
 
 #### 1. Physical Hardware Timing:
-* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match theoretical single-byte arrival time at 115200 baud), the timer reaches compare match every $2185 \div 4 = \mathbf{546\text{ CPU cycles}}$ at 6.29 MHz ($11,521.7\text{ ticks/sec}$).
+* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match theoretical single-byte arrival time at 115200 baud), the timer reaches compare match every 2185 ÷ 4 = **546 CPU cycles** at 6.29 MHz (11,521.7 ticks/sec).
 * **Hardware Differences Between K2 and Jr2:**
-  * **Wildbits K2 (`$16`):** Features a dedicated, event-driven hardware interrupt (`INT_WIZFI` on Group 3) that only triggers when bytes are present in the FIFO. The driver uses `iThrottle` to mask interrupts when the buffer is full and unmasks on read. Background CPU utilization is $< 1\%$.
+  * **Wildbits K2 (`$16`):** Features a dedicated, event-driven hardware interrupt (`INT_WIZFI` on Group 3) that only triggers when bytes are present in the FIFO. The driver uses `iThrottle` to mask interrupts when the buffer is full and unmasks on read. Background CPU utilization is < 1%.
   * **Wildbits Jr2 (`$1A`):** Does not have the hardware Wi-Fi interrupt line populated. Instead, it relies on continuous background polling via Timer 0 (`INT_TIMER_0` on Group 0).
 
 #### 2. The High-Frequency Polling Cascade:
-* **NitrOS-9 Interrupt Overhead:** The 6809 interrupt entry (12-byte register push, vector fetch from `$FFF8`), kernel `krn.asm` `XIRQ` mapping, `clock.asm` `DoPoll` loop, `ioman.asm` `IRQPoll` table traversal, `wizfi.asm` `iService` execution, and `RTI` require $\approx 406\text{ CPU cycles}$ per tick.
-* **CPU Starvation at 11.52 kHz:** At $546\text{ cycles/tick}$, IRQ dispatch consumes $\approx 75\%$ of total 6809 CPU cycles. During boot (`startup`), when the OS performs hundreds of SPI SD card sector reads (`llwbsd`), interrupting the CPU every 35 instructions drops disk and foreground throughput to a crawl, appearing as a hang on console.
+* **NitrOS-9 Interrupt Overhead:** The 6809 interrupt entry (12-byte register push, vector fetch from `$FFF8`), kernel `krn.asm` `XIRQ` mapping, `clock.asm` `DoPoll` loop, `ioman.asm` `IRQPoll` table traversal, `wizfi.asm` `iService` execution, and `RTI` require ≈ 406 CPU cycles per tick.
+* **CPU Starvation at 11.52 kHz:** At 546 cycles/tick, IRQ dispatch consumes ≈ 75% of total 6809 CPU cycles. During boot (`startup`), when the OS performs hundreds of SPI SD card sector reads (`llwbsd`), interrupting the CPU every 35 instructions drops disk and foreground throughput to a crawl, appearing as a hang on console.
 
 #### 3. Emulation Timing Optimization (1 kHz Scheduling Floor):
 * **1 kHz Scheduling Period Floor:** In MAME's `timer0_tick` and `timer_w`, Timer 0 compare intervals are clamped to a minimum period of **1 ms (1 kHz maximum frequency)**:
@@ -493,8 +493,8 @@ A critical architectural distinction between physical FPGA hardware and discrete
   ```
 * **Fidelity & Performance Impact:**
   * **Registers & Protocol:** All hardware registers (`$FE30-$FE37`, `$FF20-$FF29`), compare registers, status flags (`T0_STAT`), and interrupt pending bits operate identically to physical hardware.
-  * **Zero Data Loss:** The WizFi360 hardware FIFO holds 2,048 bytes (2KB). At 115,200 baud, at most $\approx 11.5\text{ bytes}$ arrive per millisecond, which easily buffers without overrun.
-  * **Throughput & Responsiveness:** Reduces IRQ overhead from $\approx 75\%$ to $\approx 6.5\%$, giving $>93\%$ CPU capacity to the shell and disk drivers, enabling instant boots and zero-latency keyboard typing.
+  * **Zero Data Loss:** The WizFi360 hardware FIFO holds 2,048 bytes (2KB). At 115,200 baud, at most ≈ 11.5 bytes arrive per millisecond, which easily buffers without overrun.
+  * **Throughput & Responsiveness:** Reduces IRQ overhead from ≈ 75% to ≈ 6.5%, giving > 93% CPU capacity to the shell and disk drivers, enabling instant boots and zero-latency keyboard typing.
 
 ---
 
