@@ -16,6 +16,7 @@
 > **Build NitrOS-9 Level 2 SD Image:**
 > ```bash
 > make -C $NITROS9DIR/recipes/wildbits/l2 PLATFORM=jr2
+> # Pad image to a standard SD card capacity greater than the file (e.g. 4M, 8M, 16M, 32M, 64M)
 > truncate -s 4M $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
 >
@@ -27,6 +28,8 @@
 > # NitrOS-9 Level 2 (SD card)
 > ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
+>
+> **SD Card Image Sizing:** MAME's SPI SD card controller validates disk images against standard SD/SDHC capacity structures (which require power-of-two or 512KB-aligned sector counts). ToolShed (`os9 copy`) creates sparse/unpadded images with non-standard byte counts as files are added. Always use `truncate -s <size>` to pad the `.dsk` image to the next standard SD card size larger than the actual file (e.g. `4M` for default builds, or `8M`, `16M`, `32M`, etc., if additional packages/files are added).
 >
 > **Keyboard Input in MAME:** To toggle between MAME UI controls and direct keyboard input for the terminal/shell, press <kbd>Fn</kbd> + <kbd>Delete</kbd> (on Mac) or <kbd>Forward Delete</kbd> / <kbd>Scroll Lock</kbd> (on PC) until MAME displays *UI controls disabled*.
 
