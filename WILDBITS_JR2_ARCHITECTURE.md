@@ -310,7 +310,7 @@ truncate -s 4M $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 
 ---
 
-## 7. WizFi360 Wi-Fi Hardware Subsystem & Emulation Plan
+## 7. WizFi360 Wi-Fi Hardware Subsystem & Emulation Architecture
 
 ### 7.1 Hardware Architecture
 
@@ -327,60 +327,145 @@ The Wildbits Jr2 integrates a **WIZnet WizFi360-PA** Wi-Fi module connected to t
 
 | Address | Name | Access | Function |
 | :--- | :--- | :--- | :--- |
-| **`$FF20`** | `WIZFI_CTRL` | R/W | **Control / Status Register:**<br>• Bit 3: `TxEmpty` (1 = TX FIFO is empty)<br>• Bit 2: `RxEmpty` (1 = RX FIFO is empty, no incoming bytes)<br>• Bit 1: `Reset` (Write 1 to reset WizFi360 module)<br>• Bit 0: `Rate` (Baud rate select: 0 = 115200 bps, 1 = high-speed) |
-| **`$FF21`** | `WIZFI_DATA` | R/W | **FIFO Data Port:**<br>• Write: Pushes byte into 2KB TX FIFO<br>• Read: Pops byte from 2KB RX FIFO |
+| **`$FF20`** | `WIZFI_CTRL` | R/W | **Control / Status Register:**<br>• Bit 3: `TxEmpty` (1 = TX FIFO is empty)<br>• Bit 2: `RxEmpty` (1 = RX FIFO is empty, no incoming bytes)<br>• Bit 1: `Reset` (Write 1 to assert reset line; write 0 to release)<br>• Bit 0: `Rate` (Baud rate select: 0 = 115200 bps, 1 = 921600 bps) |
+| **`$FF21`** | `WIZFI_DATA` | R/W | **FIFO Data Port:**<br>• Write: Pushes byte into 2KB TX FIFO (or streams to socket in transparent mode)<br>• Read: Pops byte from 2KB RX FIFO |
 | **`$FF22-$FF23`** | `WIZFI_RX_RD_CNT` | R | 16-bit RX FIFO Read Pointer |
 | **`$FF24-$FF25`** | `WIZFI_RX_WR_CNT` | R | **16-bit Available RX Bytes Count** (High byte at `$FF24`, Low byte at `$FF25`). Crucial for driver `RxFCheck` polling. |
 | **`$FF26-$FF27`** | `WIZFI_TX_RD_CNT` | R | 16-bit TX FIFO Read Pointer |
 | **`$FF28-$FF29`** | `WIZFI_TX_WR_CNT` | R | 16-bit TX FIFO Write Pointer |
 
-* **Interrupt:** `INT_WIFI` is routed to **Interrupt Group 3, Bit 0** (`$FE23` pending, `$FE2F` mask). Asserts whenever RX FIFO contains data (`RxEmpty == 0`).
+* **Interrupt Routing:** `INT_WIFI` is routed to **Interrupt Group 3, Bit 0** (`$FE23` pending, `$FE2F` mask). Asserts whenever RX FIFO contains data (`RxEmpty == 0`). In addition, Timer 0 interrupt (`INT_TIMER_0` on Group 0, Bit 4) is triggered on incoming data to wake the NitrOS-9 `iService` polling loop.
 
 ---
 
-### 7.3 NitrOS-9 `wizfi.asm` Driver Operation
+### 7.3 NitrOS-9 Software & Script Interactions
 
-The Level 2 driver `wizfi.asm` initializes the network interface during `iniz wz` / `startup`:
-1. **Timer Configuration:** Configures Hardware Timer 0 at 11.52 kHz (`TRATE = 2185` cycles on 25.175 MHz clock), enables `INT_TIMER_0`, and unmasks `INT_WIFI`.
-2. **AT Synchronization Sequence:**
-   * Asserts and releases reset via `$FF20`.
-   * Sends `AT\r\n` → expects `OK\r\n`.
-   * Sends `ATE0\r\n` (echo off) → expects `OK\r\n`.
-   * Sends `AT+CWMODE=1\r\n` (station mode) → expects `OK\r\n`.
-   * Sends `AT+CIPMUX=1\r\n` (multi-connection mode) → expects `OK\r\n`.
-3. **Polling & Service Loop (`iService`):**
-   * On Timer 0 ticks, `iService` calls `RxFCheck` to read `$FF24-$FF25`.
-   * If bytes are available, it reads data from `$FF21`, parses AT command responses, and manages network channels (0..4) for TCP/UDP and DriveWire.
+The WizFi360 interface is utilized across multiple software layers in NitrOS-9 Level 2:
+
+1. **Driver Initialization (`iniz wz` / `startup`):**
+   * Configures Timer 0 at 11.52 kHz (`TRATE = 2185` cycles on 25.175 MHz dot clock), enables `INT_TIMER_0`, and unmasks `INT_WIFI`.
+   * Pulses hardware reset via `$FF20`, synchronizes with `AT\r\n` $\rightarrow$ `OK\r\n`, disables echo (`ATE0`), sets station mode (`AT+CWMODE=1`), and enables multi-connection mode (`AT+CIPMUX=1`).
+2. **Wi-Fi Router Configuration (`SCRIPTS/wizcon`):**
+   * Configures persistent station parameters (`AT+CWMODE_DEF=1`, `AT+CWDHCP_DEF=1,1`, `AT+CWJAP_DEF="ssid","pass"`).
+   * Verifies IP assignment via `AT+CIPSTA_CUR?`.
+3. **Connection Status Monitoring (`SCRIPTS/wizstat`):**
+   * Queries station IP configuration (`AT+CIPSTA_CUR?`) and connection status (`AT+CIPSTATUS`).
+4. **FujiNet / DriveWire over Wi-Fi (`SCRIPTS/fncon` & `CMDS/fndiscon`):**
+   * `fncon`: Configures single connection mode (`AT+CIPMUX=0`), enables transparent transmission mode (`AT+CIPMODE=1`), establishes a TCP socket (`AT+CIPSTART="TCP","192.168.1.100",65504`), enters raw stream mode (`AT+CIPSEND`), and runs `fnstatus` / DriveWire DWoW.
+   * `fndiscon.as`: Uses 1-second guard delay, sends `+++` escape sequence, waits for transition back to command mode, executes `AT+CIPCLOSE`, and pulses hardware reset to clear FIFOs.
+5. **Telnet Server & Multi-Channel Services (`SCRIPTS/wizsv1`, `SCRIPTS/wizsv4`, `SCRIPTS/wizout*`):**
+   * Configures TCP servers via `AT+CIPSERVER` / `AT+CIPSERVERMAXCONN` / `AT+CIPSTO` for telnet daemon login (`TSMON`) and outgoing TCP connections.
+6. **MQTT Client Engine (`SCRIPTS/mpub`, `SCRIPTS/mqtt_*`):**
+   * Interacts with WizFi360 built-in MQTT client commands (`AT+MQTTSET`, `AT+MQTTTOPIC`, `AT+MQTTCON`, `AT+MQTTPUB`, `AT+MQTTSUB`, `AT+MQTTDIS`).
 
 ---
 
-### 7.4 WizFi360 Emulation Implementation & Socket Bridge
+### 7.4 Emulation Architecture & Implementation Strategy
 
 ```mermaid
-graph LR
-    CPU[6809 CPU Access $FF20-$FF29] <--> FIFO[2KB TX/RX Ring Buffers]
-    FIFO <--> AT[AT Command Parser State Machine]
-    AT <--> NET[Host Sockets / FujiNet Bridge]
+graph TD
+    subgraph 6809 Bus Layer
+        CPU[6809 CPU Access $FF20-$FF29]
+        CTRL[WIZFI_CTRL $FF20]
+        DATA[WIZFI_DATA $FF21]
+        CNT[RX_WR_CNT $FF24-$FF25]
+    end
+
+    subgraph FPGA FIFO Layer
+        RXF[2KB RX FIFO Buffer]
+        TXF[2KB TX Buffer]
+    end
+
+    subgraph Emulated WizFi360 Engine
+        STATE[State Machine: Command vs Transparent Mode]
+        PARSER[Authentic AT Command Parser]
+        ESC[+++ Escape Sequence Detector]
+        FRAMER[+IPD Packet Framer]
+    end
+
+    subgraph Host Network Layer
+        SOCK[MAME osd_file Socket Layer]
+        HOST[Host TCP/UDP Bridge: FujiNet / pyDriveWire / Internet]
+    end
+
+    CPU <--> CTRL
+    CPU <--> DATA
+    CPU <--> CNT
+    DATA <--> RXF
+    DATA <--> TXF
+    CTRL --> STATE
+    TXF --> PARSER
+    TXF --> ESC
+    ESC --> SOCK
+    PARSER --> SOCK
+    SOCK --> FRAMER
+    SOCK --> RXF
+    FRAMER --> RXF
+    SOCK <--> HOST
 ```
 
-1. **Hardware Registers & 2KB Dual FIFOs (Implemented & Verified):**
-   * Emulated register map `$FF20-$FF29` with dual 2KB hardware FIFOs, read/write counters, and available RX byte count registers (`$FF24-$FF25`).
-   * `$FF20` control/status register reports `TxEmpty` (`0x08`), `RxEmpty` (`0x04`), hardware reset execution (`0x02`), and baud rate mode (`0x01`).
-   * `INT_WIFI` (`set_irq(3, 0x01)`) and Timer 0 (`set_irq(0, 0x10)`) assert dynamically on FIFO data arrival, preventing CPU interrupt starvation during idle polling.
+#### Strategic Dual-Layer Networking Design:
+* **Pre-Configured NVRAM State (Out-of-the-Box Operation):** On physical hardware, once Wi-Fi credentials have been saved to flash via `AT+CWJAP_DEF`, the WizFi360 retains them across reboots and automatically joins the network on power-up. MAME emulates this by booting with `m_wizfi_wifi_connected = true` and emitting the authentic auto-connect sequence (`ready` $\rightarrow$ `WIFI CONNECTED` $\rightarrow$ `WIFI GOT IP`), allowing drivers and networking tools to function immediately.
+* **Full Dynamic Reconfigurability:** The emulator fully executes all configuration commands (`AT+CWJAP_DEF`, `AT+CWMODE_DEF`, `AT+CWDHCP_DEF`, `AT+CWQAP`), updating the active SSID and network state dynamically.
+* **Transparent Host Socket Bridging:** When TCP/UDP connections are opened (`AT+CIPSTART`), MAME creates non-blocking sockets using its native `osd_file` TCP abstraction (`socket.host:port`), seamlessly connecting to host FujiNet servers (`192.168.1.100:65504` or `127.0.0.1:65504`) and remote internet hosts.
 
-2. **Complete AT Command Parser & State Machine (Implemented & Verified):**
-   * Comprehensive AT parser handling all NitrOS-9 software, scripts (`wizcon`, `wizstat`, `wizsv1`, `wizsv4`, `wizout*`, `mpub`), and tool sequences:
-     * **System & Synchronization:** `AT`, `ATE0`/`ATE1` (echo control), `AT+GMR` (firmware revision), `AT+RST` (software reset), `AT+UART_CUR`/`AT+UART_DEF`, `AT+SYSSTORE`.
-     * **Station & Wi-Fi Management:** `AT+CWMODE`/`AT+CWMODE_DEF` (Station/SoftAP/Station+SoftAP), `AT+CWDHCP`/`AT+CWDHCP_DEF`, `AT+CWJAP`/`AT+CWJAP_DEF` (AP join), `AT+CWQAP`, `AT+CWLAP`, `AT+CIPSTA`/`AT+CIPSTA_CUR` (station IP/gateway/netmask query), `AT+CIFSR` (IP/MAC query).
-     * **TCP/IP Configuration & Sockets:** `AT+CIPMUX=0`/`1` (single vs multi-connection), `AT+CIPMODE=0`/`1` (normal vs transparent), `AT+CIPSTATUS` (connection state querying), `AT+CIPSERVER`/`AT+CIPSERVERMAXCONN`/`AT+CIPSTO`.
-     * **Socket Connections & Teardown:** `AT+CIPSTART` (TCP/UDP socket creation), `AT+CIPCLOSE` (socket teardown).
-     * **MQTT Protocol Engine:** `AT+MQTTSET`, `AT+MQTTTOPIC`, `AT+MQTTCON`, `AT+MQTTPUB`, `AT+MQTTSUB`, `AT+MQTTDIS`.
+---
 
-3. **Transparent Transmission Mode & Host Socket Bridge (Implemented & Verified):**
-   * **Transparent Streaming:** In `CIPMODE=1`, `AT+CIPSEND` activates transparent pass-through mode, streaming raw bytes directly between `$FF21` and the active host socket (used by `fncon` and DriveWire).
-   * **Escape Sequence Handling:** Real-time detection of `+++` escape sequences with guard delays to transition from data streaming back to AT command mode without severing the TCP session (used by `fndiscon.as`).
-   * **Packet Mode Framing:** In `CIPMODE=0`, incoming socket data is framed as `\r\n+IPD,<link_id>,<len>:<data>` (or `\r\n+IPD,<len>:<data>`), matching hardware WizFi360 behavior. Outgoing packets are buffered according to `<len>` with `SEND OK` confirmation.
-   * **Host Network Bridging:** Native socket connection support via MAME's `osd_file` TCP socket abstraction to FujiNet / pyDriveWire servers (`192.168.1.100:65504` or `127.0.0.1:65504`) and external internet hosts.
+### 7.5 Hardware Verification & Response Specification
+
+The emulation has been directly verified against the physical WIZnet WizFi360 hardware on the Wildbits Jr2:
+
+1. **Firmware Release & SDK Metadata (`AT+GMR`):**
+   ```text
+   AT version:1.1.2.0(Apr 12 2023 08:08:36)
+   SDK version:3.2.0(a0ffff9f)
+   compile time:Apr 12 2023 08:08:36
+
+   OK
+   ```
+2. **Hardware MAC & Vendor OUI Formatting (`AT+CIFSR`, `AT+CIPSTAMAC_CUR?`, `AT+CIPAPMAC_CUR?`):**
+   * Station MAC: `00:08:dc:6b:e3:36` (lowercase hexadecimal with WIZnet vendor prefix `00:08:dc`).
+   * SoftAP MAC: `02:08:dc:6b:e3:36` (locally administered MAC).
+   * `AT+CIFSR` output:
+     ```text
+     +CIFSR:STAIP,"192.168.1.100"
+     +CIFSR:STAMAC,"00:08:dc:6b:e3:36"
+
+     OK
+     ```
+3. **Query Response Formatting (`_CUR`, `_DEF`, standard):**
+   * `AT+UART_CUR?` / `AT+UART_DEF?` $\rightarrow$ `+UART_CUR:115200,8,1,0,0\r\nOK\r\n` (no extra blank line).
+   * `AT+CWMODE_DEF?` $\rightarrow$ `+CWMODE_DEF:1\r\n\r\nOK\r\n`.
+   * `AT+CWDHCP_DEF?` $\rightarrow$ `+CWDHCP_DEF:3\r\nOK\r\n`.
+   * `AT+CIPMUX?` $\rightarrow$ `+CIPMUX:0\r\n\r\nOK\r\n`.
+   * `AT+CIPMODE?` $\rightarrow$ `+CIPMODE:0\r\n\r\nOK\r\n`.
+   * `AT+SYSSTORE?` $\rightarrow$ `ERROR\r\n` (unsupported command on WizFi360 W600 firmware).
+4. **Hardware Reset Transition (`$FF20` Bit 1: $1 \rightarrow 0$) and `AT+RST`:**
+   * Emits the power-on auto-connect sequence:
+     ```text
+     ready
+     WIFI CONNECTED
+     WIFI GOT IP
+     ```
+5. **Connection State Reporting (`AT+CIPSTATUS`):**
+   * `STATUS:2` when associated with AP and IP obtained.
+   * `STATUS:3` with `+CIPSTATUS:<id>,"TCP","<host>",<remote_port>,5000,0` when socket is connected.
+   * `STATUS:5` when disconnected from Wi-Fi.
+
+---
+
+### 7.6 Transparent Streaming, `+++` Escape, & Packet Framing
+
+1. **Transparent Transmission Mode (`CIPMODE=1` & `AT+CIPSEND`):**
+   * Initiated via `AT+CIPSEND` $\rightarrow$ prompts with `\r\nOK\r\n\r\n> `.
+   * Subsequent writes to `$FF21` stream directly to the open host socket without AT buffering.
+   * Incoming socket bytes are pushed raw into `m_wizfi_rx_fifo` and trigger `INT_WIFI` / `INT_TIMER_0`.
+2. **`+++` Escape Sequence Detection:**
+   * Detects 3 consecutive `+` characters with quiet guard delays.
+   * Switches from transparent data streaming back to command mode without severing the TCP session.
+3. **Normal Mode Packet Framing (`CIPMODE=0`):**
+   * `AT+CIPSEND=<len>` $\rightarrow$ prompts with `\r\nOK\r\n> `, buffers `<len>` bytes, and confirms with `\r\nRecv <len> bytes\r\n\r\nSEND OK\r\n`.
+   * Incoming data from socket is formatted as `\r\n+IPD,<link_id>,<len>:<data>` (or `\r\n+IPD,<len>:<data>` for single mode).
 
 ---
 
@@ -397,7 +482,7 @@ graph LR
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
 | **PS/2 Keyboard** | Host matrix mapped to PS/2 Set 2 scan codes (make/break) | **Completed & Verified** (Interactive typing) |
-| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Transparent Mode, Socket Bridge | **Completed & Verified** (Full AT parser, transparent streaming, `+++` escape, packet framing, and host BSD/POSIX socket bridge for NitrOS-9 driver and FujiNet/DriveWire) |
+| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Transparent Mode, Socket Bridge | **Completed & Verified** (Verified against physical hardware: firmware v1.1.2.0, WIZnet MAC formatting, auto-connect reset banner, transparent streaming, `+++` escape detector, `+IPD` packet framing, and host BSD/POSIX socket bridge for NitrOS-9 driver and FujiNet/DriveWire) |
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) | *Planned* |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
 | **TinyVicky Sprites** | 64 hardware sprites with 4 composite layers | *Planned* |
