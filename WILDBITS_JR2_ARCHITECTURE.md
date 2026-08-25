@@ -7,21 +7,21 @@
 The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a modern retrocomputing platform powered by an FPGA-centric architecture. When loaded with the **FNX6809** firmware core, the system pairs a Motorola 6809 CPU core with the **TinyVicky II** graphics engine, a hardware Memory Management Unit (MMU), integrated audio synthesizers, high-speed DMA, an integer math coprocessor, and rich peripheral interfaces.
 
 ```
-+-----------------------------------------------------------------------------------+
-|                                 WILDBITS JR2 (FNX6809)                            |
-+-----------------------------------------------------------------------------------+
-|  [6809 CPU @ 6.29 MHz] <---> [MMU (4x MLUTs + DAT)] <---> [512KB SRAM / 512KB Flash]|
-|         |                                                             |           |
-|         v                                                             v           |
-|  [TinyVicky II Video]                                          [System I/O & Bus] |
-|   - 80x30 / 80x60 Text (8x8 glyphs, DBL_Y/X)                    - Dual SPI SD Card|
-|   - 3x 256-Color Bitmaps (320x240 / 320x200)                    - WizFi360 2KB FIFO|
-|   - 3x Scrolling Tilemaps (8x8 / 16x16)                         - 16550 UART Serial|
-|   - 64x Hardware Sprites (8x8 to 32x32)                         - PS/2 Keyboard/Mouse|
-|   - 4x 256-Color Graphics CLUTs + 2x Text CLUTs                 - bq4802 RTC Clock |
-|   - Hardware Grayscale Mouse Cursor                             - 65C22 VIA / Joysticks|
-|   - Hardware Line Interrupts (SOL / SOF)                        - Dual PSG + Dual SID|
-+-----------------------------------------------------------------------------------+
++----------------------------------------------------------------------------------------+
+|                                 WILDBITS JR2 (FNX6809)                                 |
++----------------------------------------------------------------------------------------+
+|  [6809 CPU @ 6.29 MHz] <---> [MMU (4x MLUTs + DAT)] <---> [512KB SRAM / 512KB Flash]   |
+|            |                                                |                          |
+|            v                                                v                          |
+|  [TinyVicky II Video]                              [System I/O & Bus]                  |
+|  - 80x30 / 80x60 Text (8x8 glyphs, DBL_Y/X)        - Dual SPI SD Card Ports            |
+|  - 3x 256-Color Bitmaps (320x240 / 320x200)        - WizFi360 2KB Hardware FIFOs       |
+|  - 3x Scrolling Tilemaps (8x8 / 16x16)             - 16550 UART Serial Port            |
+|  - 64x Hardware Sprites (8x8 to 32x32)             - PS/2 Keyboard & Mouse Ports       |
+|  - 4x Graphics CLUTs + 2x Text CLUTs               - bq4802 Real-Time Clock (RTC)      |
+|  - Hardware Grayscale Mouse Cursor                 - WDC 65C22 VIA / Joysticks         |
+|  - Line Interrupts & Counters (SOL/SOF)            - Dual PSG + Dual SID Audio         |
++----------------------------------------------------------------------------------------+
 ```
 
 ### Key Specifications
@@ -169,11 +169,11 @@ $FFA8 - $FFAF: MMU Slot Mapping Registers (when EDIT_EN = 1)
 TinyVicky II text mode geometry is governed by **Master Control Register 1 (`$FFC1`)**:
 
 * **Bit 2 (`DBL_Y` = `$04`):** Doubles character height (16 scanlines per character row).
-  * When `DBL_Y = 1`: **30 rows** in 60Hz ($480 / 16$) or **25 rows** in 70Hz ($400 / 16$).
-  * When `DBL_Y = 0`: **60 rows** in 60Hz ($480 / 8$) or **50 rows** in 70Hz ($400 / 8$).
+  * When `DBL_Y = 1`: **30 rows** in 60Hz (480 / 16) or **25 rows** in 70Hz (400 / 16).
+  * When `DBL_Y = 0`: **60 rows** in 60Hz (480 / 8) or **50 rows** in 70Hz (400 / 8).
 * **Bit 1 (`DBL_X` = `$02`):** Doubles character width (16 pixels per character column).
-  * When `DBL_X = 1`: **40 columns** ($640 / 16$).
-  * When `DBL_X = 0`: **80 columns** ($640 / 8$).
+  * When `DBL_X = 1`: **40 columns** (640 / 16).
+  * When `DBL_X = 0`: **80 columns** (640 / 8).
 * **Bit 0 (`CLK_70` = `$01`):** Selects 70Hz refresh rate (400 vertical scanlines) instead of standard 60Hz (480 scanlines).
 * **Hardware Default:** On boot, the system initializes to **80 columns × 30 rows** (`DBL_Y = 1`, `DBL_X = 0`, `m_vky_mstr_ctrl_1 = 0x04`).
 
@@ -197,8 +197,8 @@ Unlike standard VGA, TinyVicky separates text foreground and background color lo
   * Bit 2 = 0: Character Invert Mode, 1: Line Cursor Mode
 * **`$FFD2` (`VKY_TXT_CURSOR_CHAR_REG`):** Cursor Glyph (e.g. `'_'` or block)
 * **`$FFD3` (`VKY_TXT_CURSOR_COLR_REG`):** Cursor text attribute byte
-* **`$FFD4-$FFD5` (`VKY_TXT_CURSOR_X_REG_H/L`):** Column coordinate ($0..79$)
-* **`$FFD6-$FFD7` (`VKY_TXT_CURSOR_Y_REG_H/L`):** Row coordinate ($0..29$ or $0..59$)
+* **`$FFD4-$FFD5` (`VKY_TXT_CURSOR_X_REG_H/L`):** Column coordinate (0..79)
+* **`$FFD6-$FFD7` (`VKY_TXT_CURSOR_Y_REG_H/L`):** Row coordinate (0..29 or 0..59)
 * **Rendering:** Character cell inversion at `(CUR_X, CUR_Y)` flashing at a 30Hz rate when blink is enabled.
 
 ---
