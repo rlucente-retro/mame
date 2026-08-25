@@ -25,7 +25,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
 ```
 
 ### Key Specifications
-* **CPU:** Motorola 6809 soft core (FNX6809, Big Endian) running inside a Xilinx Artix-7 FPGA (XC7A35T), clocked at 6.29 MHz (half the 14.318181 MHz master crystal).
+* **CPU:** Motorola 6809 soft core (FNX6809, Big Endian) running inside a Xilinx Artix-7 FPGA (XC7A35T), clocked at 6.29 MHz (1/4th of the 25.175 MHz video dot clock oscillator; configured in MAME via `XTAL(25'175'000)` with internal $\div 4$).
 * **System Bus:** 21-bit physical address bus addressing up to 2 MB of physical address space.
 * **CPU Address Space:** 16-bit (64 KB) paged into eight 8 KB slots via 4 hardware Look-Up Tables (MLUTs).
 * **System RAM:** 512 KB onboard high-speed SRAM (Physical Blocks `$00 - $3F`, physical `0x000000 - 0x07FFFF`).
@@ -281,25 +281,32 @@ mkdir -p roms/wbjr2
 cp $NITROS9DIR/recipes/wildbits/feu/{booter,f0.dsk} roms/wbjr2/
 ```
 
+> [!NOTE]
+> MAME declares `f0.dsk` and `booter` with `NO_DUMP` in `ROM_START(wbjr2)`, allowing ROMs to be rebuilt frequently during development without CRC mismatch warnings.
+
 #### Standalone Boot Behavior:
-When run without an SD card (`./mame wbjr2 -window`):
+When run without an SD card (`./mame wbjr2 -window -skip_gameinfo`):
 1. The 6809 boots at `$FFFE` into `trampoline.asm`, unpacking Level 1 NitrOS-9 into RAM.
 2. `SysGo` tries mounting `/c0` (Cartridge), `/s0` (SD Card), and falls back to **`/f0` (Flash Disk)**.
 3. `SysGo` executes `/f0/feu/startup`, displays system banner and `wbinfo`, and launches the interactive `pick` menu (`o: Boot OS-9, d: Debugger, s: Shell, r: Reset`).
 
 ### 6.2 Stage 2: NitrOS-9 Level 2 from SD Card
-When an SD card with a bootable Level 2 filesystem (`/s0/OS9Boot`) is attached (`-hard /tmp/wildbits_sd.img`):
+When an SD card with a bootable Level 2 filesystem (`/s0/OS9Boot`) is attached (`./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk`):
 1. FEU booter runs `bootos9 /s0/OS9Boot`.
 2. `bootos9` loads the multi-module Level 2 kernel into RAM blocks `$00..$3F`.
 3. The MMU configures Level 2 DAT mapping via `$FFA0` and enables the **`$FD00-$FDFF` constant RAM window** via `$FFA1` bit 0.
-4. Level 2 `SysGo` starts `startup` and launches the interactive `Shell+ v2.2a` prompt `{TERM|02}/dd:`.
+4. Level 2 `SysGo` starts `startup` (which initializes utilities and the WizFi360 driver via `iniz wz`) and launches the interactive `Shell+ v2.2a` prompt `{TERM|02}/dd:`.
 
 #### Building the bootable SD Card image:
 ```bash
 export NITROS9DIR=/path/to/nitros9
 make -C $NITROS9DIR/recipes/wildbits/l2 PLATFORM=jr2
+# Pad image to a standard SD card capacity greater than the file (e.g. 4M, 8M, 16M, 32M, 64M)
+truncate -s 4M $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 ```
-In this case, the bootable image is `$NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk` but other recipes under `$NITROS9DIR/recipes/wildbits` will generate different images.
+
+> [!IMPORTANT]
+> **SD Card Image Sizing:** MAME's SPI SD card controller validates disk images against standard SD/SDHC capacity structures (which require power-of-two or 512KB-aligned sector counts). ToolShed (`os9 copy`) creates sparse/unpadded images with non-standard byte counts as files are added. Always use `truncate -s <size>` to pad the `.dsk` image to the next standard SD card size larger than the actual file (e.g. `4M` for default builds, or `8M`, `16M`, `32M`, etc., if additional packages/files are added).
 
 ---
 
@@ -347,9 +354,7 @@ The Level 2 driver `wizfi.asm` initializes the network interface during `iniz wz
 
 ---
 
-### 7.4 WizFi360 Emulation Implementation Plan
-
-To fully support `wizfi.asm` and network applications in MAME:
+### 7.4 WizFi360 Emulation Implementation & Socket Bridge Plan
 
 ```mermaid
 graph LR
@@ -358,16 +363,21 @@ graph LR
     AT <--> NET[BSD Host Sockets / DriveWire Bridge]
 ```
 
-1. **Dual 2 KB FIFO Buffers:**
-   * Maintain `std::queue<uint8_t> m_wizfi_tx_fifo` and `m_wizfi_rx_fifo` (max 2048 bytes).
-   * Update `$FF20` bits (`TxEmpty`, `RxEmpty`) and `$FF24-$FF25` (`m_wizfi_rx_fifo.size()`).
-   * Trigger `INT_WIFI` (`set_irq(3, 0x01)`) when `m_wizfi_rx_fifo` transitions to non-empty.
+1. **Dual 2 KB FIFO Buffers & Status Registers (Implemented & Verified):**
+   * Emulated register map `$FF20-$FF29` with TX/RX FIFOs and available count registers (`$FF24-$FF25`).
+   * `$FF20` control/status reports `TxEmpty` (`0x08`), `RxEmpty` (`0x04`), and handles hardware reset.
+   * `INT_WIFI` (`set_irq(3, 0x01)`) and Timer 0 (`set_irq(0, 0x10)`) assert when RX FIFO transitions to non-empty, preventing CPU interrupt starvation during idle polling.
 
-2. **AT State Machine Engine:**
-   * Buffer incoming TX strings until `\r` or `\n`.
-   * Implement handlers for standard AT command set:
+2. **AT State Machine Engine (Implemented & Verified):**
+   * Buffers incoming TX strings until `\r` or `\n`.
+   * Automatically generates responses to AT initialization queries:
      * `AT` $\to$ `\r\nOK\r\n`
      * `AT+GMR` $\to$ `\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n`
+     * `AT+CIPSTATUS` $\to$ `\r\nSTATUS:5\r\n\r\nOK\r\n`
+   * Enables NitrOS-9 `iniz wz` / `startup` to initialize seamlessly without stalling.
+
+3. **Socket Bridge & Network Applications (Planned Extension):**
+   * Support extended AT networking commands:
      * `AT+CWMODE=...` $\to$ `\r\nOK\r\n`
      * `AT+CWJAP_CUR?` / `AT+CWJAP=...` $\to$ `\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n`
      * `AT+CIFSR` $\to$ return virtual station IP (`+CIFSR:STAIP,"192.168.1.100"\r\n\r\nOK\r\n`)
@@ -377,7 +387,7 @@ graph LR
      * `AT+CIPCLOSE=<link_id>` $\to$ close socket connection.
      * Incoming socket data $\to$ emit `\r\n+IPD,<link_id>,<len>:<data>` into RX FIFO.
 
-3. **DriveWire Over Wi-Fi (DWoW):**
+4. **DriveWire Over Wi-Fi (DWoW) (Planned Extension):**
    * Allow connection to host DriveWire server (e.g. `pyDriveWire` running on `localhost:65504`) to enable virtual floppy drives, DriveWire printers, and networking.
 
 ---
