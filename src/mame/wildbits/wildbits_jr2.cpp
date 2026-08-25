@@ -580,18 +580,16 @@ void wildbits_jr2_state::intc_w(offs_t offset, uint8_t data)
 TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer0_tick)
 {
 	m_t0_stat |= 0x01; // Compare match status
+	set_irq(0, 0x10);  // INT_TIMER_0 (Bit 4 of Group 0)
 
 	poll_wizfi_socket();
 
-	// If WizFi has incoming bytes or periodically (60Hz), assert INT_TIMER_0
-	if (!m_wizfi_rx_fifo.empty() || m_t0_cmp > 10000 || (m_frame_count % 4 == 0))
-	{
-		set_irq(0, 0x10);  // INT_TIMER_0 (Bit 4 of Group 0)
-	}
-
 	if (m_t0_cmp > 0 && (m_t0_ctr & 0x01))
 	{
-		m_timer0->adjust(attotime::from_hz(25'175'000) * m_t0_cmp);
+		attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
+		if (period < attotime::from_hz(1000))
+			period = attotime::from_hz(1000);
+		m_timer0->adjust(period);
 	}
 }
 
@@ -649,7 +647,12 @@ void wildbits_jr2_state::timer_w(offs_t offset, uint8_t data)
 		if (data & 0x01) // Enable
 		{
 			if (m_t0_cmp > 0)
-				m_timer0->adjust(attotime::from_hz(25'175'000) * m_t0_cmp);
+			{
+				attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
+				if (period < attotime::from_hz(1000))
+					period = attotime::from_hz(1000);
+				m_timer0->adjust(period);
+			}
 		}
 		else
 		{
@@ -828,7 +831,6 @@ void wildbits_jr2_state::push_wizfi_response(const std::string &resp)
 		if (m_wizfi_rx_fifo.size() < 2048)
 			m_wizfi_rx_fifo.push((uint8_t)c);
 	}
-	set_irq(0, 0x10);
 }
 
 void wildbits_jr2_state::reset_wizfi()
@@ -888,7 +890,6 @@ void wildbits_jr2_state::poll_wizfi_socket()
 					m_wizfi_rx_fifo.push(rx_buf[i]);
 			}
 		}
-		set_irq(0, 0x10);
 	}
 }
 
