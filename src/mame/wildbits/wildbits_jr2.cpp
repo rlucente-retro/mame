@@ -312,6 +312,7 @@ private:
 	bool m_wizfi_echo;
 	int m_wizfi_cwmode;
 	bool m_wizfi_wifi_connected;
+	std::string m_wizfi_ssid;
 	int m_wizfi_link_id;
 	std::string m_wizfi_remote_host;
 	int m_wizfi_remote_port;
@@ -846,6 +847,7 @@ void wildbits_jr2_state::reset_wizfi()
 	m_wizfi_echo = false;
 	m_wizfi_cwmode = 1;
 	m_wizfi_wifi_connected = true;
+	m_wizfi_ssid = "WildbitsNet";
 	m_wizfi_link_id = 0;
 	m_wizfi_remote_host.clear();
 	m_wizfi_remote_port = 0;
@@ -945,6 +947,15 @@ void wildbits_jr2_state::handle_cipstart(const std::string &cmd)
 	if (m_wizfi_socket)
 	{
 		push_wizfi_response("\r\nALREADY CONNECTED\r\n\r\nERROR\r\n");
+		return;
+	}
+
+	if (!m_wizfi_wifi_connected)
+	{
+		if (m_wizfi_cipmux)
+			push_wizfi_response(util::string_format("\r\n%d,CLOSED\r\n\r\nCONNECT FAIL\r\n\r\nERROR\r\n", link_id));
+		else
+			push_wizfi_response("\r\nCLOSED\r\n\r\nCONNECT FAIL\r\n\r\nERROR\r\n");
 		return;
 	}
 
@@ -1099,10 +1110,21 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 		{
 			std::string tag = (cmd_upper.find("_DEF") != std::string::npos) ? "+CWJAP_DEF" :
 			                  (cmd_upper.find("_CUR") != std::string::npos) ? "+CWJAP_CUR" : "+CWJAP";
-			push_wizfi_response(util::string_format("\r\n%s:\"WildbitsNet\",\"00:08:dc:6b:e3:36\",1,-50\r\n\r\nOK\r\n", tag.c_str()));
+			push_wizfi_response(util::string_format("\r\n%s:\"%s\",\"00:08:dc:6b:e3:36\",1,-50\r\n\r\nOK\r\n", tag.c_str(), m_wizfi_ssid.c_str()));
 		}
 		else
 		{
+			size_t eq = cmd.find('=');
+			if (eq != std::string::npos)
+			{
+				std::string arg = cmd.substr(eq + 1);
+				size_t comma = arg.find(',');
+				std::string ssid = (comma != std::string::npos) ? arg.substr(0, comma) : arg;
+				while (!ssid.empty() && (ssid.front() == '"' || ssid.front() == ' ')) ssid.erase(0, 1);
+				while (!ssid.empty() && (ssid.back() == '"' || ssid.back() == ' ')) ssid.pop_back();
+				if (!ssid.empty())
+					m_wizfi_ssid = ssid;
+			}
 			m_wizfi_wifi_connected = true;
 			push_wizfi_response("\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n");
 		}
