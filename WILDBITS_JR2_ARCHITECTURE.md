@@ -354,7 +354,7 @@ The Level 2 driver `wizfi.asm` initializes the network interface during `iniz wz
 
 ---
 
-### 7.4 WizFi360 Emulation Implementation & Socket Bridge Plan
+### 7.4 WizFi360 Emulation Status & Socket Bridge Plan
 
 ```mermaid
 graph LR
@@ -363,32 +363,26 @@ graph LR
     AT <--> NET[BSD Host Sockets / DriveWire Bridge]
 ```
 
-1. **Dual 2 KB FIFO Buffers & Status Registers (Implemented & Verified):**
+1. **Basic Hardware Registers & FIFO Buffers (Implemented):**
    * Emulated register map `$FF20-$FF29` with TX/RX FIFOs and available count registers (`$FF24-$FF25`).
    * `$FF20` control/status reports `TxEmpty` (`0x08`), `RxEmpty` (`0x04`), and handles hardware reset.
    * `INT_WIFI` (`set_irq(3, 0x01)`) and Timer 0 (`set_irq(0, 0x10)`) assert when RX FIFO transitions to non-empty, preventing CPU interrupt starvation during idle polling.
 
-2. **AT State Machine Engine (Implemented & Verified):**
+2. **Boot Synchronization AT Engine (Implemented):**
    * Buffers incoming TX strings until `\r` or `\n`.
-   * Automatically generates responses to AT initialization queries:
+   * Automatically generates responses to initial boot synchronization queries:
      * `AT` → `\r\nOK\r\n`
      * `AT+GMR` → `\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n`
      * `AT+CIPSTATUS` → `\r\nSTATUS:5\r\n\r\nOK\r\n`
-   * Enables NitrOS-9 `iniz wz` / `startup` to initialize seamlessly without stalling.
+   * Allows the NitrOS-9 Level 2 boot sequence (`iniz wz` / `startup`) to complete successfully.
 
-3. **Socket Bridge & Network Applications (Planned Extension):**
-   * Support extended AT networking commands:
-     * `AT+CWMODE=...` → `\r\nOK\r\n`
-     * `AT+CWJAP_CUR?` / `AT+CWJAP=...` → `\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n`
-     * `AT+CIFSR` → return virtual station IP (`+CIFSR:STAIP,"192.168.1.100"\r\n\r\nOK\r\n`)
-     * `AT+CIPMUX=...` → `\r\nOK\r\n`
-     * `AT+CIPSTART=<link_id>,"TCP",<ip>,<port>` → establish host TCP socket connection.
-     * `AT+CIPSEND=<link_id>,<len>` → enter raw data pass-through mode and stream bytes over socket.
-     * `AT+CIPCLOSE=<link_id>` → close socket connection.
-     * Incoming socket data → emit `\r\n+IPD,<link_id>,<len>:<data>` into RX FIFO.
-
-4. **DriveWire Over Wi-Fi (DWoW) (Planned Extension):**
-   * Allow connection to host DriveWire server (e.g. `pyDriveWire` running on `localhost:65504`) to enable virtual floppy drives, DriveWire printers, and networking.
+3. **Networking & Transparent Mode for FujiNet / DriveWire (Planned / Pending):**
+   * Advanced AT commands and network operations utilized by scripts such as `fncon` and `fndiscon` require full host socket bridging:
+     * **Transparent Transmission Mode:** `AT+CIPMODE=1`, `AT+CIPSEND` (entering raw stream pass-through mode).
+     * **Socket Management:** `AT+CIPSTART="TCP",<ip>,<port>` (establish host TCP socket) and `AT+CIPCLOSE` (teardown socket).
+     * **Multi-Connection Mode:** `AT+CIPMUX=0` / `AT+CIPMUX=1`.
+     * **Escape Sequence Handling:** Detecting `+++` with 1-second guard delays to transition from data streaming back to AT command mode.
+     * **Host Network Bridging:** Routing TCP/UDP traffic to local FujiNet/DriveWire servers (e.g. `192.168.1.100:65504`) for virtual disk, printer, and network access.
 
 ---
 
@@ -405,7 +399,7 @@ graph LR
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
 | **PS/2 Keyboard** | Host matrix mapped to PS/2 Set 2 scan codes (make/break) | **Completed & Verified** (Interactive typing) |
-| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Socket Bridge | **Completed & Verified** (Registers `$FF20-$FF29`, FIFO buffering, and AT engine for NitrOS-9 initialization) |
+| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Socket Bridge | *Partially Implemented* (Basic registers `$FF20-$FF29`, FIFO buffering, and AT responses for `iniz wz` boot; transparent mode, socket bridging, and FujiNet/DriveWire commands like `fncon`/`fndiscon` are planned) |
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) | *Planned* |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
 | **TinyVicky Sprites** | 64 hardware sprites with 4 composite layers | *Planned* |
