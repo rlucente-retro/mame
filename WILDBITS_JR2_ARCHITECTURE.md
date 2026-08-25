@@ -354,35 +354,33 @@ The Level 2 driver `wizfi.asm` initializes the network interface during `iniz wz
 
 ---
 
-### 7.4 WizFi360 Emulation Status & Socket Bridge Plan
+### 7.4 WizFi360 Emulation Implementation & Socket Bridge
 
 ```mermaid
 graph LR
     CPU[6809 CPU Access $FF20-$FF29] <--> FIFO[2KB TX/RX Ring Buffers]
     FIFO <--> AT[AT Command Parser State Machine]
-    AT <--> NET[BSD Host Sockets / DriveWire Bridge]
+    AT <--> NET[Host Sockets / FujiNet Bridge]
 ```
 
-1. **Basic Hardware Registers & FIFO Buffers (Implemented):**
-   * Emulated register map `$FF20-$FF29` with TX/RX FIFOs and available count registers (`$FF24-$FF25`).
-   * `$FF20` control/status reports `TxEmpty` (`0x08`), `RxEmpty` (`0x04`), and handles hardware reset.
-   * `INT_WIFI` (`set_irq(3, 0x01)`) and Timer 0 (`set_irq(0, 0x10)`) assert when RX FIFO transitions to non-empty, preventing CPU interrupt starvation during idle polling.
+1. **Hardware Registers & 2KB Dual FIFOs (Implemented & Verified):**
+   * Emulated register map `$FF20-$FF29` with dual 2KB hardware FIFOs, read/write counters, and available RX byte count registers (`$FF24-$FF25`).
+   * `$FF20` control/status register reports `TxEmpty` (`0x08`), `RxEmpty` (`0x04`), hardware reset execution (`0x02`), and baud rate mode (`0x01`).
+   * `INT_WIFI` (`set_irq(3, 0x01)`) and Timer 0 (`set_irq(0, 0x10)`) assert dynamically on FIFO data arrival, preventing CPU interrupt starvation during idle polling.
 
-2. **Boot Synchronization AT Engine (Implemented):**
-   * Buffers incoming TX strings until `\r` or `\n`.
-   * Automatically generates responses to initial boot synchronization queries:
-     * `AT` → `\r\nOK\r\n`
-     * `AT+GMR` → `\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n`
-     * `AT+CIPSTATUS` → `\r\nSTATUS:5\r\n\r\nOK\r\n`
-   * Allows the NitrOS-9 Level 2 boot sequence (`iniz wz` / `startup`) to complete successfully.
+2. **Complete AT Command Parser & State Machine (Implemented & Verified):**
+   * Comprehensive AT parser handling all NitrOS-9 software, scripts (`wizcon`, `wizstat`, `wizsv1`, `wizsv4`, `wizout*`, `mpub`), and tool sequences:
+     * **System & Synchronization:** `AT`, `ATE0`/`ATE1` (echo control), `AT+GMR` (firmware revision), `AT+RST` (software reset), `AT+UART_CUR`/`AT+UART_DEF`, `AT+SYSSTORE`.
+     * **Station & Wi-Fi Management:** `AT+CWMODE`/`AT+CWMODE_DEF` (Station/SoftAP/Station+SoftAP), `AT+CWDHCP`/`AT+CWDHCP_DEF`, `AT+CWJAP`/`AT+CWJAP_DEF` (AP join), `AT+CWQAP`, `AT+CWLAP`, `AT+CIPSTA`/`AT+CIPSTA_CUR` (station IP/gateway/netmask query), `AT+CIFSR` (IP/MAC query).
+     * **TCP/IP Configuration & Sockets:** `AT+CIPMUX=0`/`1` (single vs multi-connection), `AT+CIPMODE=0`/`1` (normal vs transparent), `AT+CIPSTATUS` (connection state querying), `AT+CIPSERVER`/`AT+CIPSERVERMAXCONN`/`AT+CIPSTO`.
+     * **Socket Connections & Teardown:** `AT+CIPSTART` (TCP/UDP socket creation), `AT+CIPCLOSE` (socket teardown).
+     * **MQTT Protocol Engine:** `AT+MQTTSET`, `AT+MQTTTOPIC`, `AT+MQTTCON`, `AT+MQTTPUB`, `AT+MQTTSUB`, `AT+MQTTDIS`.
 
-3. **Networking & Transparent Mode for FujiNet / DriveWire (Planned / Pending):**
-   * Advanced AT commands and network operations utilized by scripts such as `fncon` and `fndiscon` require full host socket bridging:
-     * **Transparent Transmission Mode:** `AT+CIPMODE=1`, `AT+CIPSEND` (entering raw stream pass-through mode).
-     * **Socket Management:** `AT+CIPSTART="TCP",<ip>,<port>` (establish host TCP socket) and `AT+CIPCLOSE` (teardown socket).
-     * **Multi-Connection Mode:** `AT+CIPMUX=0` / `AT+CIPMUX=1`.
-     * **Escape Sequence Handling:** Detecting `+++` with 1-second guard delays to transition from data streaming back to AT command mode.
-     * **Host Network Bridging:** Routing TCP/UDP traffic to local FujiNet/DriveWire servers (e.g. `192.168.1.100:65504`) for virtual disk, printer, and network access.
+3. **Transparent Transmission Mode & Host Socket Bridge (Implemented & Verified):**
+   * **Transparent Streaming:** In `CIPMODE=1`, `AT+CIPSEND` activates transparent pass-through mode, streaming raw bytes directly between `$FF21` and the active host socket (used by `fncon` and DriveWire).
+   * **Escape Sequence Handling:** Real-time detection of `+++` escape sequences with guard delays to transition from data streaming back to AT command mode without severing the TCP session (used by `fndiscon.as`).
+   * **Packet Mode Framing:** In `CIPMODE=0`, incoming socket data is framed as `\r\n+IPD,<link_id>,<len>:<data>` (or `\r\n+IPD,<len>:<data>`), matching hardware WizFi360 behavior. Outgoing packets are buffered according to `<len>` with `SEND OK` confirmation.
+   * **Host Network Bridging:** Native socket connection support via MAME's `osd_file` TCP socket abstraction to FujiNet / pyDriveWire servers (`192.168.1.100:65504` or `127.0.0.1:65504`) and external internet hosts.
 
 ---
 
@@ -399,10 +397,11 @@ graph LR
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
 | **PS/2 Keyboard** | Host matrix mapped to PS/2 Set 2 scan codes (make/break) | **Completed & Verified** (Interactive typing) |
-| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Socket Bridge | *Partially Implemented* (Basic registers `$FF20-$FF29`, FIFO buffering, and AT responses for `iniz wz` boot; transparent mode, socket bridging, and FujiNet/DriveWire commands like `fncon`/`fndiscon` are planned) |
+| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Transparent Mode, Socket Bridge | **Completed & Verified** (Full AT parser, transparent streaming, `+++` escape, packet framing, and host BSD/POSIX socket bridge for NitrOS-9 driver and FujiNet/DriveWire) |
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) | *Planned* |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
 | **TinyVicky Sprites** | 64 hardware sprites with 4 composite layers | *Planned* |
 | **Audio Synthesizers** | Dual PSG (SN76489) + Dual SID (MOS 6581) + WM8776 CODEC | *Planned* |
+
 
 

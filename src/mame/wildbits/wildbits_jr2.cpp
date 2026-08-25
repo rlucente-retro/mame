@@ -217,6 +217,12 @@ private:
 	// WizFi360 WiFi / SPI ($FF20 - $FF2F)
 	uint8_t wizfi_r(offs_t offset);
 	void wizfi_w(offs_t offset, uint8_t data);
+	void push_wizfi_response(const std::string &resp);
+	void process_wizfi_cmd(const std::string &cmd_raw);
+	void handle_cipstart(const std::string &cmd);
+	void handle_cipsend(const std::string &cmd);
+	void poll_wizfi_socket();
+	void reset_wizfi();
 
 	// TinyVicky Video handlers ($FFC0 - $FFDF)
 	uint8_t vky_r(offs_t offset);
@@ -297,6 +303,19 @@ private:
 	std::queue<uint8_t> m_wizfi_rx_fifo;
 	std::string m_wizfi_tx_buf;
 	uint8_t m_wizfi_ctrl;
+	bool m_wizfi_transparent;
+	int m_wizfi_plus_count;
+	int m_wizfi_cipsend_remaining;
+	int m_wizfi_cipsend_total;
+	bool m_wizfi_cipmux;
+	bool m_wizfi_cipmode;
+	bool m_wizfi_echo;
+	int m_wizfi_cwmode;
+	bool m_wizfi_wifi_connected;
+	int m_wizfi_link_id;
+	std::string m_wizfi_remote_host;
+	int m_wizfi_remote_port;
+	osd_file::ptr m_wizfi_socket;
 
 	// TinyVicky Master Registers
 	uint8_t m_vky_mstr_ctrl_0;
@@ -561,6 +580,8 @@ TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer0_tick)
 {
 	m_t0_stat |= 0x01; // Compare match status
 
+	poll_wizfi_socket();
+
 	// If WizFi has incoming bytes or periodically (60Hz), assert INT_TIMER_0
 	if (!m_wizfi_rx_fifo.empty() || m_t0_cmp > 10000 || (m_frame_count % 4 == 0))
 	{
@@ -577,6 +598,8 @@ TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer1_tick)
 {
 	m_t1_stat |= 0x01;
 	set_irq(0, 0x20);  // INT_TIMER_1 (Bit 5 of Group 0)
+
+	poll_wizfi_socket();
 
 	if (m_t1_cmp > 0 && (m_t1_ctr & 0x01))
 	{
@@ -797,13 +820,384 @@ void wildbits_jr2_state::sdc_data_w(uint8_t data)
 }
 
 // WizFi360 WiFi / SPI Controller ($FF20 - $FF2F)
+void wildbits_jr2_state::push_wizfi_response(const std::string &resp)
+{
+	for (char c : resp)
+	{
+		if (m_wizfi_rx_fifo.size() < 2048)
+			m_wizfi_rx_fifo.push((uint8_t)c);
+	}
+	set_irq(3, 0x01);
+	set_irq(0, 0x10);
+}
+
+void wildbits_jr2_state::reset_wizfi()
+{
+	while (!m_wizfi_rx_fifo.empty())
+		m_wizfi_rx_fifo.pop();
+	m_wizfi_tx_buf.clear();
+	m_wizfi_ctrl = 0;
+	m_wizfi_transparent = false;
+	m_wizfi_plus_count = 0;
+	m_wizfi_cipsend_remaining = 0;
+	m_wizfi_cipsend_total = 0;
+	m_wizfi_cipmux = false;
+	m_wizfi_cipmode = false;
+	m_wizfi_echo = false;
+	m_wizfi_cwmode = 1;
+	m_wizfi_wifi_connected = true;
+	m_wizfi_link_id = 0;
+	m_wizfi_remote_host.clear();
+	m_wizfi_remote_port = 0;
+	if (m_wizfi_socket)
+		m_wizfi_socket.reset();
+}
+
+void wildbits_jr2_state::poll_wizfi_socket()
+{
+	if (!m_wizfi_socket)
+		return;
+
+	uint8_t rx_buf[512];
+	uint32_t actual = 0;
+	std::error_condition err = m_wizfi_socket->read(rx_buf, 0, sizeof(rx_buf), actual);
+	if (!err && actual > 0)
+	{
+		if (m_wizfi_transparent)
+		{
+			for (uint32_t i = 0; i < actual; i++)
+			{
+				if (m_wizfi_rx_fifo.size() < 2048)
+					m_wizfi_rx_fifo.push(rx_buf[i]);
+			}
+		}
+		else
+		{
+			std::string header = m_wizfi_cipmux ?
+				util::string_format("\r\n+IPD,%d,%d:", m_wizfi_link_id, actual) :
+				util::string_format("\r\n+IPD,%d:", actual);
+			for (char c : header)
+			{
+				if (m_wizfi_rx_fifo.size() < 2048)
+					m_wizfi_rx_fifo.push((uint8_t)c);
+			}
+			for (uint32_t i = 0; i < actual; i++)
+			{
+				if (m_wizfi_rx_fifo.size() < 2048)
+					m_wizfi_rx_fifo.push(rx_buf[i]);
+			}
+		}
+		set_irq(3, 0x01);
+		set_irq(0, 0x10);
+	}
+}
+
+void wildbits_jr2_state::handle_cipstart(const std::string &cmd)
+{
+	size_t eq = cmd.find('=');
+	if (eq == std::string::npos)
+	{
+		push_wizfi_response("\r\nERROR\r\n");
+		return;
+	}
+
+	std::string args = cmd.substr(eq + 1);
+	std::vector<std::string> parts;
+	std::string current;
+	bool in_quote = false;
+	for (char c : args)
+	{
+		if (c == '"')
+		{
+			in_quote = !in_quote;
+		}
+		else if (c == ',' && !in_quote)
+		{
+			parts.push_back(current);
+			current.clear();
+		}
+		else
+		{
+			current += c;
+		}
+	}
+	if (!current.empty())
+		parts.push_back(current);
+
+	int link_id = 0;
+	std::string type, host;
+	int port = 0;
+	int idx = 0;
+
+	if (parts.size() >= 3 && parts[0].find_first_not_of("0123456789") == std::string::npos && !parts[0].empty())
+	{
+		link_id = std::stoi(parts[0]);
+		idx = 1;
+	}
+
+	if (idx < (int)parts.size()) type = parts[idx++];
+	if (idx < (int)parts.size()) host = parts[idx++];
+	if (idx < (int)parts.size()) port = std::stoi(parts[idx++]);
+
+	while (!host.empty() && (host.front() == '"' || host.front() == ' ')) host.erase(0, 1);
+	while (!host.empty() && (host.back() == '"' || host.back() == ' ')) host.pop_back();
+
+	m_wizfi_link_id = link_id;
+	m_wizfi_remote_host = host;
+	m_wizfi_remote_port = port;
+
+	if (m_wizfi_socket)
+		m_wizfi_socket.reset();
+
+	uint64_t filesize = 0;
+	std::string socket_path = util::string_format("socket.%s:%d", host.c_str(), port);
+	std::error_condition err = osd_file::open(socket_path, OPEN_FLAG_READ | OPEN_FLAG_WRITE, m_wizfi_socket, filesize);
+
+	if (err && (host == "192.168.1.100" || host == "localhost"))
+	{
+		std::string fallback_path = util::string_format("socket.127.0.0.1:%d", port);
+		err = osd_file::open(fallback_path, OPEN_FLAG_READ | OPEN_FLAG_WRITE, m_wizfi_socket, filesize);
+	}
+
+	if (!err && m_wizfi_socket)
+	{
+		if (m_wizfi_cipmux)
+			push_wizfi_response(util::string_format("\r\n%d,CONNECT\r\n\r\nOK\r\n", link_id));
+		else
+			push_wizfi_response("\r\nCONNECT\r\n\r\nOK\r\n");
+	}
+	else
+	{
+		if (m_wizfi_cipmux)
+			push_wizfi_response(util::string_format("\r\n%d,CLOSED\r\n\r\nCONNECT FAIL\r\n\r\nERROR\r\n", link_id));
+		else
+			push_wizfi_response("\r\nCLOSED\r\n\r\nCONNECT FAIL\r\n\r\nERROR\r\n");
+	}
+}
+
+void wildbits_jr2_state::handle_cipsend(const std::string &cmd)
+{
+	if (m_wizfi_cipmode)
+	{
+		push_wizfi_response("\r\nOK\r\n\r\n>");
+		m_wizfi_transparent = true;
+		m_wizfi_plus_count = 0;
+	}
+	else
+	{
+		size_t eq = cmd.find('=');
+		if (eq != std::string::npos)
+		{
+			std::string arg = cmd.substr(eq + 1);
+			size_t comma = arg.find(',');
+			int len = 0;
+			if (comma != std::string::npos)
+				len = std::stoi(arg.substr(comma + 1));
+			else
+				len = std::stoi(arg);
+
+			m_wizfi_cipsend_remaining = len;
+			m_wizfi_cipsend_total = len;
+			push_wizfi_response("\r\nOK\r\n>");
+		}
+		else
+		{
+			push_wizfi_response("\r\nERROR\r\n");
+		}
+	}
+}
+
+void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
+{
+	if (m_wizfi_echo)
+	{
+		push_wizfi_response(cmd_raw + "\r\n");
+	}
+
+	std::string cmd = cmd_raw;
+	while (!cmd.empty() && (cmd.back() == '\r' || cmd.back() == '\n' || cmd.back() == ' '))
+		cmd.pop_back();
+
+	if (cmd.empty())
+		return;
+
+	std::string cmd_upper = cmd;
+	for (char &c : cmd_upper)
+		c = toupper((unsigned char)c);
+
+	if (cmd_upper == "AT")
+	{
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper == "ATE0")
+	{
+		m_wizfi_echo = false;
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper == "ATE1")
+	{
+		m_wizfi_echo = true;
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+GMR", 0) == 0)
+	{
+		push_wizfi_response("\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+RST", 0) == 0)
+	{
+		reset_wizfi();
+		push_wizfi_response("\r\nOK\r\n\r\nready\r\n");
+	}
+	else if (cmd_upper.rfind("AT+UART", 0) == 0 || cmd_upper.rfind("AT+SYSSTORE", 0) == 0)
+	{
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CWMODE", 0) == 0)
+	{
+		if (cmd.find('?') != std::string::npos)
+		{
+			push_wizfi_response(util::string_format("\r\n+CWMODE:%d\r\n\r\nOK\r\n", m_wizfi_cwmode));
+		}
+		else
+		{
+			size_t eq = cmd.find('=');
+			if (eq != std::string::npos && eq + 1 < cmd.length())
+				m_wizfi_cwmode = cmd[eq + 1] - '0';
+			push_wizfi_response("\r\nOK\r\n");
+		}
+	}
+	else if (cmd_upper.rfind("AT+CWDHCP", 0) == 0)
+	{
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CWJAP", 0) == 0)
+	{
+		if (cmd.find('?') != std::string::npos)
+		{
+			push_wizfi_response("\r\n+CWJAP:\"WildbitsNet\",\"00:11:22:33:44:55\",1,-50\r\n\r\nOK\r\n");
+		}
+		else
+		{
+			m_wizfi_wifi_connected = true;
+			push_wizfi_response("\r\nWIFI CONNECTED\r\nWIFI GOT IP\r\n\r\nOK\r\n");
+		}
+	}
+	else if (cmd_upper.rfind("AT+CWQAP", 0) == 0)
+	{
+		m_wizfi_wifi_connected = false;
+		push_wizfi_response("\r\nOK\r\nWIFI DISCONNECT\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CWLAP", 0) == 0)
+	{
+		push_wizfi_response("\r\n+CWLAP:(4,\"WildbitsNet\",-50,\"00:11:22:33:44:55\",1)\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CIPSTA", 0) == 0)
+	{
+		push_wizfi_response("\r\n+CIPSTA:ip:\"192.168.1.100\"\r\n+CIPSTA:gateway:\"192.168.1.1\"\r\n+CIPSTA:netmask:\"255.255.255.0\"\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CIFSR", 0) == 0)
+	{
+		push_wizfi_response("\r\n+CIFSR:STAIP,\"192.168.1.100\"\r\n+CIFSR:STAMAC,\"00:08:dc:11:22:33\"\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CIPMUX", 0) == 0)
+	{
+		if (cmd.find('?') != std::string::npos)
+		{
+			push_wizfi_response(util::string_format("\r\n+CIPMUX:%d\r\n\r\nOK\r\n", m_wizfi_cipmux ? 1 : 0));
+		}
+		else
+		{
+			size_t eq = cmd.find('=');
+			if (eq != std::string::npos && eq + 1 < cmd.length())
+				m_wizfi_cipmux = (cmd[eq + 1] != '0');
+			push_wizfi_response("\r\nOK\r\n");
+		}
+	}
+	else if (cmd_upper.rfind("AT+CIPMODE", 0) == 0)
+	{
+		if (cmd.find('?') != std::string::npos)
+		{
+			push_wizfi_response(util::string_format("\r\n+CIPMODE:%d\r\n\r\nOK\r\n", m_wizfi_cipmode ? 1 : 0));
+		}
+		else
+		{
+			size_t eq = cmd.find('=');
+			if (eq != std::string::npos && eq + 1 < cmd.length())
+				m_wizfi_cipmode = (cmd[eq + 1] != '0');
+			push_wizfi_response("\r\nOK\r\n");
+		}
+	}
+	else if (cmd_upper.rfind("AT+CIPSTATUS", 0) == 0)
+	{
+		if (m_wizfi_socket)
+		{
+			push_wizfi_response(util::string_format("\r\nSTATUS:3\r\n+CIPSTATUS:%d,\"TCP\",\"%s\",%d,0\r\n\r\nOK\r\n",
+				m_wizfi_link_id, m_wizfi_remote_host.c_str(), m_wizfi_remote_port));
+		}
+		else
+		{
+			push_wizfi_response("\r\nSTATUS:5\r\n\r\nOK\r\n");
+		}
+	}
+	else if (cmd_upper.rfind("AT+CIPSERVER", 0) == 0 || cmd_upper.rfind("AT+CIPSTO", 0) == 0)
+	{
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CIPSTART", 0) == 0)
+	{
+		handle_cipstart(cmd);
+	}
+	else if (cmd_upper.rfind("AT+CIPCLOSE", 0) == 0)
+	{
+		if (m_wizfi_socket)
+			m_wizfi_socket.reset();
+		m_wizfi_transparent = false;
+		if (m_wizfi_cipmux)
+			push_wizfi_response(util::string_format("\r\n%d,CLOSED\r\n\r\nOK\r\n", m_wizfi_link_id));
+		else
+			push_wizfi_response("\r\nCLOSED\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+CIPSEND", 0) == 0)
+	{
+		handle_cipsend(cmd);
+	}
+	else if (cmd_upper.rfind("AT+MQTTSET", 0) == 0 || cmd_upper.rfind("AT+MQTTTOPIC", 0) == 0)
+	{
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+MQTTCON", 0) == 0)
+	{
+		push_wizfi_response("\r\n+MQTTCON:OK\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+MQTTPUB", 0) == 0)
+	{
+		push_wizfi_response("\r\n+MQTTPUB:OK\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+MQTTSUB", 0) == 0)
+	{
+		push_wizfi_response("\r\n+MQTTSUB:OK\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+MQTTDIS", 0) == 0)
+	{
+		push_wizfi_response("\r\n+MQTTDIS:OK\r\n\r\nOK\r\n");
+	}
+	else if (cmd_upper.rfind("AT+", 0) == 0)
+	{
+		push_wizfi_response("\r\nOK\r\n");
+	}
+	else
+	{
+		push_wizfi_response("\r\nERROR\r\n");
+	}
+}
+
 uint8_t wildbits_jr2_state::wizfi_r(offs_t offset)
 {
 	switch (offset)
 	{
 	case 0x00: {
 		uint8_t ctrl = m_wizfi_ctrl & 0x03;
-		if (m_wizfi_tx_buf.empty()) ctrl |= 0x08; // TxEmpty
+		if (m_wizfi_tx_buf.empty() && m_wizfi_cipsend_remaining == 0) ctrl |= 0x08; // TxEmpty
 		if (m_wizfi_rx_fifo.empty()) ctrl |= 0x04; // RxEmpty
 		return ctrl;
 	}
@@ -822,8 +1216,8 @@ uint8_t wildbits_jr2_state::wizfi_r(offs_t offset)
 	case 0x05: return m_wizfi_rx_fifo.size() & 0xff;        // Rx WR cnt lo
 	case 0x06: return 0x00; // Tx RD cnt hi
 	case 0x07: return 0x00; // Tx RD cnt lo
-	case 0x08: return 0x00; // Tx WR cnt hi
-	case 0x09: return m_wizfi_tx_buf.length() & 0xff;       // Tx WR cnt lo
+	case 0x08: return (m_wizfi_tx_buf.length() >> 8) & 0xff; // Tx WR cnt hi
+	case 0x09: return m_wizfi_tx_buf.length() & 0xff;        // Tx WR cnt lo
 	default: return 0x00;
 	}
 }
@@ -836,33 +1230,72 @@ void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 		m_wizfi_ctrl = data;
 		if (data & 0x02) // Reset
 		{
-			while (!m_wizfi_rx_fifo.empty()) m_wizfi_rx_fifo.pop();
-			m_wizfi_tx_buf.clear();
+			reset_wizfi();
 		}
 		break;
 	case 0x01:
-		if (data == '\r' || data == '\n')
+		if (m_wizfi_transparent)
 		{
-			if (!m_wizfi_tx_buf.empty())
+			if (data == '+')
 			{
-				std::string cmd = m_wizfi_tx_buf;
-				m_wizfi_tx_buf.clear();
-				std::string resp = "\r\nOK\r\n";
-				if (cmd.rfind("AT+GMR", 0) == 0)
-					resp = "\r\nWIZnet WizFi360 1.0.4.0\r\n\r\nOK\r\n";
-				else if (cmd.rfind("AT+CIPSTATUS", 0) == 0)
-					resp = "\r\nSTATUS:5\r\n\r\nOK\r\n";
-				for (char c : resp)
+				m_wizfi_plus_count++;
+				if (m_wizfi_plus_count == 3)
 				{
-					m_wizfi_rx_fifo.push((uint8_t)c);
+					m_wizfi_transparent = false;
+					m_wizfi_plus_count = 0;
+					return;
 				}
-				set_irq(0, 0x10);
-				set_irq(3, 0x01);
+			}
+			else
+			{
+				if (m_wizfi_plus_count > 0)
+				{
+					for (int i = 0; i < m_wizfi_plus_count; i++)
+					{
+						char p = '+';
+						uint32_t written = 0;
+						if (m_wizfi_socket)
+							m_wizfi_socket->write(&p, 0, 1, written);
+					}
+					m_wizfi_plus_count = 0;
+				}
+				if (m_wizfi_socket)
+				{
+					char c = (char)data;
+					uint32_t written = 0;
+					m_wizfi_socket->write(&c, 0, 1, written);
+				}
+			}
+		}
+		else if (m_wizfi_cipsend_remaining > 0)
+		{
+			if (m_wizfi_socket)
+			{
+				char c = (char)data;
+				uint32_t written = 0;
+				m_wizfi_socket->write(&c, 0, 1, written);
+			}
+			m_wizfi_cipsend_remaining--;
+			if (m_wizfi_cipsend_remaining == 0)
+			{
+				std::string resp = util::string_format("\r\nRecv %d bytes\r\n\r\nSEND OK\r\n", m_wizfi_cipsend_total);
+				push_wizfi_response(resp);
 			}
 		}
 		else
 		{
-			m_wizfi_tx_buf += (char)data;
+			if (data == '\r' || data == '\n')
+			{
+				if (!m_wizfi_tx_buf.empty())
+				{
+					process_wizfi_cmd(m_wizfi_tx_buf);
+					m_wizfi_tx_buf.clear();
+				}
+			}
+			else
+			{
+				m_wizfi_tx_buf += (char)data;
+			}
 		}
 		break;
 	}
@@ -1275,9 +1708,7 @@ void wildbits_jr2_state::machine_reset()
 	m_sdcard_miso = 1;
 
 	// Reset WizFi360
-	m_wizfi_ctrl = 0;
-	m_wizfi_tx_buf.clear();
-	while (!m_wizfi_rx_fifo.empty()) m_wizfi_rx_fifo.pop();
+	reset_wizfi();
 
 	// Initialize Video Master defaults: Text Mode enabled (640x480, 80x30)
 	m_vky_mstr_ctrl_0 = 0x01; // TEXT enabled
