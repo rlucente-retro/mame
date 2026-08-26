@@ -20,16 +20,33 @@
 > truncate -s 4M $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
 >
+> **Build NitrOS-9 DriveWire Images:**
+> ```bash
+> # Level 1 DriveWire
+> make -C $NITROS9DIR/recipes/wildbits/l1dw PLATFORM=jr2
+>
+> # Level 2 DriveWire
+> make -C $NITROS9DIR/recipes/wildbits/l2dw PLATFORM=jr2
+> ```
+>
 > **SD Card Image Sizing:** MAME's SPI SD card controller validates disk images against standard SD/SDHC capacity structures (which require power-of-two or 512KB-aligned sector counts). ToolShed (`os9 copy`) creates sparse/unpadded images with non-standard byte counts as files are added. Always use `truncate -s <size>` to pad the `.dsk` image to the next standard SD card size larger than the actual file (e.g. `4M` for default builds, or `8M`, `16M`, `32M`, etc., if additional packages/files are added).
+>
+> **Launch pyDriveWire (for DriveWire Boot):**
+> ```bash
+> export PYDRIVEWIREDIR=/path/to/pyDriveWire
+> python $PYDRIVEWIREDIR/pyDriveWire.py --accept --port 65504 -d $NITROS9DIR/recipes/wildbits/l2dw/l2_wildbits_dwjr2.dsk
+> ```
 >
 > **Launch Emulator:**
 > ```bash
-> # Standalone FEU (Flash disk)
+> # Standalone FEU (Flash disk) or DriveWire Boot
 > ./mame wbjr2 -window -skip_gameinfo
 >
 > # NitrOS-9 Level 2 (SD card)
 > ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > ```
+>
+> **Booting from DriveWire in MAME:** When running `./mame wbjr2` with pyDriveWire listening on port 65504, the emulated 16550 UART automatically bridges to pyDriveWire. In the FEU menu, press <kbd>o</kbd> (*Boot OS-9*), then <kbd>x</kbd> (*Boot OS-9 from DriveWire*).
 >
 > **Keyboard Input in MAME:** To toggle between MAME UI controls and direct keyboard input for the terminal/shell, press <kbd>Fn</kbd> + <kbd>Delete</kbd> (on Mac) or <kbd>Forward Delete</kbd> / <kbd>Scroll Lock</kbd> (on PC) until MAME displays *UI controls disabled*.
 

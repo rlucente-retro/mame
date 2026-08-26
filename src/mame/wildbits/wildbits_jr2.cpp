@@ -203,6 +203,11 @@ private:
 	void ps2_w(offs_t offset, uint8_t data);
 	void queue_kbd_scancode(uint8_t scancode);
 
+	// 16550 UART ($FE60 - $FE67)
+	uint8_t uart_r(offs_t offset);
+	void uart_w(offs_t offset, uint8_t data);
+	void poll_uart_socket();
+
 	// Audio CODEC ($FE70 - $FE72)
 	uint8_t codec_r(offs_t offset);
 	void codec_w(offs_t offset, uint8_t data);
@@ -285,6 +290,17 @@ private:
 	uint8_t m_ps2_out;
 	std::queue<uint8_t> m_kbd_fifo;
 	std::queue<uint8_t> m_mouse_fifo;
+
+	// 16550 UART state
+	uint8_t m_uart_dll;
+	uint8_t m_uart_dlh;
+	uint8_t m_uart_ier;
+	uint8_t m_uart_fcr;
+	uint8_t m_uart_lcr;
+	uint8_t m_uart_mcr;
+	uint8_t m_uart_scr;
+	std::queue<uint8_t> m_uart_rx_fifo;
+	osd_file::ptr m_uart_socket;
 
 	// RTC state
 	uint8_t m_rtc_ctrl;
@@ -821,6 +837,114 @@ void wildbits_jr2_state::sdc_data_w(uint8_t data)
 		m_sdcard->spi_clock_w(0);
 	}
 	m_sdc_data_in = in_byte;
+}
+
+// 16550 UART Serial Controller ($FE60 - $FE67)
+void wildbits_jr2_state::poll_uart_socket()
+{
+	if (!m_uart_socket)
+	{
+		uint64_t filesize = 0;
+		osd_file::open("socket.127.0.0.1:65504", OPEN_FLAG_READ | OPEN_FLAG_WRITE, m_uart_socket, filesize);
+	}
+	if (!m_uart_socket)
+		return;
+
+	uint8_t buf[512];
+	uint32_t actual = 0;
+	std::error_condition err = m_uart_socket->read(buf, 0, sizeof(buf), actual);
+	if (!err && actual > 0)
+	{
+		for (uint32_t i = 0; i < actual; i++)
+		{
+			if (m_uart_rx_fifo.size() < 4096)
+				m_uart_rx_fifo.push(buf[i]);
+		}
+	}
+}
+
+uint8_t wildbits_jr2_state::uart_r(offs_t offset)
+{
+	poll_uart_socket();
+	switch (offset & 7)
+	{
+	case 0: // RBR (or DLL if DLAB=1)
+		if (m_uart_lcr & 0x80)
+			return m_uart_dll;
+		if (!m_uart_rx_fifo.empty())
+		{
+			uint8_t val = m_uart_rx_fifo.front();
+			m_uart_rx_fifo.pop();
+			return val;
+		}
+		return 0;
+	case 1: // IER (or DLH if DLAB=1)
+		if (m_uart_lcr & 0x80)
+			return m_uart_dlh;
+		return m_uart_ier;
+	case 2: // IIR
+		return m_uart_rx_fifo.empty() ? 0x01 : 0x04;
+	case 3: // LCR
+		return m_uart_lcr;
+	case 4: // MCR
+		return m_uart_mcr;
+	case 5: // LSR
+		return 0x60 | (m_uart_rx_fifo.empty() ? 0 : 0x01);
+	case 6: // MSR
+		return 0xb0; // DSR, CTS, DCD set
+	case 7: // SCR
+		return m_uart_scr;
+	}
+	return 0xff;
+}
+
+void wildbits_jr2_state::uart_w(offs_t offset, uint8_t data)
+{
+	poll_uart_socket();
+	switch (offset & 7)
+	{
+	case 0: // THR (or DLL if DLAB=1)
+		if (m_uart_lcr & 0x80)
+		{
+			m_uart_dll = data;
+		}
+		else
+		{
+			if (m_uart_socket)
+			{
+				uint32_t written = 0;
+				m_uart_socket->write(&data, 0, 1, written);
+			}
+		}
+		break;
+	case 1: // IER (or DLH if DLAB=1)
+		if (m_uart_lcr & 0x80)
+			m_uart_dlh = data;
+		else
+			m_uart_ier = data;
+		break;
+	case 2: // FCR
+		m_uart_fcr = data;
+		if (data & 0x02) // Clear RX FIFO
+		{
+			while (!m_uart_rx_fifo.empty())
+				m_uart_rx_fifo.pop();
+		}
+		break;
+	case 3: // LCR
+		m_uart_lcr = data;
+		break;
+	case 4: // MCR
+		m_uart_mcr = data;
+		break;
+	case 5: // LSR
+		break;
+	case 6: // MSR
+		break;
+	case 7: // SCR
+		m_uart_scr = data;
+		break;
+	}
 }
 
 // WizFi360 WiFi / SPI Controller ($FF20 - $FF2F)
@@ -1538,6 +1662,9 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 	// $FE50-$FE54: PS/2 Keyboard and Mouse
 	map(0xfe50, 0xfe54).rw(FUNC(wildbits_jr2_state::ps2_r), FUNC(wildbits_jr2_state::ps2_w));
 
+	// $FE60-$FE67: 16550 UART (Serial / DriveWire)
+	map(0xfe60, 0xfe67).rw(FUNC(wildbits_jr2_state::uart_r), FUNC(wildbits_jr2_state::uart_w));
+
 	// $FE70-$FE72: Audio CODEC (WM8731)
 	map(0xfe70, 0xfe72).rw(FUNC(wildbits_jr2_state::codec_r), FUNC(wildbits_jr2_state::codec_w));
 
@@ -1839,6 +1966,16 @@ void wildbits_jr2_state::machine_reset()
 
 	// Reset WizFi360
 	reset_wizfi();
+
+	// Reset 16550 UART
+	m_uart_dll = 0;
+	m_uart_dlh = 0;
+	m_uart_ier = 0;
+	m_uart_fcr = 0;
+	m_uart_lcr = 0;
+	m_uart_mcr = 0;
+	m_uart_scr = 0;
+	while (!m_uart_rx_fifo.empty()) m_uart_rx_fifo.pop();
 
 	// Initialize Video Master defaults: Text Mode enabled (640x480, 80x30)
 	m_vky_mstr_ctrl_0 = 0x01; // TEXT enabled

@@ -252,8 +252,8 @@ sequenceDiagram
     participant SD as SD Card (NitrOS-9 Level 2)
     participant RAM as System SRAM & MMU
 
-    FPGA->>Flash: 1. Power on / Reset in Flash Mode (Slot 7 -> Flash Block $7F)
-    Flash->>Flash: 2. 6809 executes reset vector ($FFFE) -> trampoline.asm
+    FPGA->>Flash: 1. Power on / Reset in Flash Mode (Slot 7 to Flash Block $7F)
+    Flash->>Flash: 2. 6809 executes reset vector ($FFFE) to trampoline.asm
     Flash->>RAM: 3. Initialize MMU MLUTs & unpack FEU (NitrOS-9 Level 1)
     Flash->>Flash: 4. FEU boots minimal system: VTIO, SDC/llwbsd, rbmem, sysgo, shell
     Note over Flash,RAM: Standalone FEU Boot: Boots to /f0/feu/startup & pick menu
@@ -364,28 +364,28 @@ The WizFi360 interface is utilized across multiple software layers in NitrOS-9 L
 
 ```mermaid
 graph TD
-    subgraph 6809 Bus Layer
-        CPU[6809 CPU Access $FF20-$FF29]
-        CTRL[WIZFI_CTRL $FF20]
-        DATA[WIZFI_DATA $FF21]
-        CNT[RX_WR_CNT $FF24-$FF25]
+    subgraph Bus_Layer ["6809 Bus Layer"]
+        CPU["6809 CPU Access $FF20-$FF29"]
+        CTRL["WIZFI_CTRL $FF20"]
+        DATA["WIZFI_DATA $FF21"]
+        CNT["RX_WR_CNT $FF24-$FF25"]
     end
 
-    subgraph FPGA FIFO Layer
-        RXF[2KB RX FIFO Buffer]
-        TXF[2KB TX Buffer]
+    subgraph FIFO_Layer ["FPGA FIFO Layer"]
+        RXF["2KB RX FIFO Buffer"]
+        TXF["2KB TX Buffer"]
     end
 
-    subgraph Emulated WizFi360 Engine
-        STATE[State Machine: Command vs Transparent Mode]
-        PARSER[Authentic AT Command Parser]
-        ESC[+++ Escape Sequence Detector]
-        FRAMER[+IPD Packet Framer]
+    subgraph WizFi_Engine ["Emulated WizFi360 Engine"]
+        STATE["State Machine: Command vs Transparent Mode"]
+        PARSER["Authentic AT Command Parser"]
+        ESC["+++ Escape Sequence Detector"]
+        FRAMER["+IPD Packet Framer"]
     end
 
-    subgraph Host Network Layer
-        SOCK[MAME osd_file Socket Layer]
-        HOST[Host TCP/UDP Bridge: FujiNet / pyDriveWire / Internet]
+    subgraph Host_Layer ["Host Network Layer"]
+        SOCK["MAME osd_file Socket Layer"]
+        HOST["Host TCP/UDP Bridge: FujiNet / pyDriveWire / Internet"]
     end
 
     CPU <--> CTRL
@@ -498,6 +498,59 @@ A critical architectural distinction between physical FPGA hardware and discrete
 
 ---
 
+### 7.8 16550 UART Serial & DriveWire Emulation
+
+The Wildbits Jr2 features a physical 16550-compatible UART mapped at `$FE60-$FE67` (clocked from the 25.175 MHz dot clock oscillator, where divisor `DLL = 6` yields 230,400 baud, 8-N-1). This interface connects via USB-C to provide serial communications and high-speed **DriveWire** virtual storage and networking.
+
+```mermaid
+graph TD
+    subgraph Bus_Interface ["6809 Bus Interface"]
+        CPU["6809 CPU Access $FE60-$FE67"]
+        REG["16550 Registers: RBR/THR, IER, IIR/FCR, LCR, MCR, LSR, MSR, SCR, DLL, DLH"]
+    end
+
+    subgraph UART_Engine ["UART Emulation Engine"]
+        DLAB["DLAB Baud Divisor Latch"]
+        RXQ["4KB RX FIFO Queue"]
+        LSR["LSR Status: TX Empty / Data Available"]
+    end
+
+    subgraph Host_Bridge ["Host Network / DriveWire Bridge"]
+        SOCK["MAME osd_file Socket: socket.127.0.0.1:65504"]
+        DW["pyDriveWire / DriveWire 4 Server"]
+    end
+
+    CPU <--> REG
+    REG <--> DLAB
+    REG <--> LSR
+    REG <--> RXQ
+    RXQ <--> SOCK
+    REG --> SOCK
+    SOCK <--> DW
+```
+
+#### Emulated Register Behaviors:
+* **`$FE60` (RBR / THR / DLL):**
+  * When `LCR[7] (DLAB) = 0`: Reading `RBR` pops the next byte from the 4KB RX FIFO; writing `THR` transmits the byte directly to the host socket.
+  * When `LCR[7] (DLAB) = 1`: Reading/writing accesses `DLL` (Baud Divisor Latch Low byte).
+* **`$FE61` (IER / DLH):**
+  * When `LCR[7] (DLAB) = 0`: Interrupt Enable Register (`IER`).
+  * When `LCR[7] (DLAB) = 1`: Baud Divisor Latch High byte (`DLH`).
+* **`$FE62` (IIR / FCR):**
+  * Reading `IIR` returns `$04` when data is available in the RX FIFO, `$01` when idle.
+  * Writing `FCR` with bit 1 set clears the RX FIFO queue.
+* **`$FE63` (LCR):** Line Control Register governing word length, stop bits, parity, and the DLAB state.
+* **`$FE64` (MCR):** Modem Control Register.
+* **`$FE65` (LSR):** Line Status Register. Returns `$60` (Transmitter Empty and Transmitter Holding Register Empty) combined with bit 0 (`$01`, Data Ready) when bytes are waiting in the RX FIFO.
+* **`$FE66` (MSR):** Modem Status Register. Returns `$B0` (DSR, CTS, and DCD asserted).
+* **`$FE67` (SCR):** Scratchpad register.
+
+#### Automatic Host Socket Bridging:
+* When the 16550 UART registers are accessed, MAME automatically opens a non-blocking TCP socket to `socket.127.0.0.1:65504` (the default port for `pyDriveWire`).
+* This enables out-of-the-box bootstrapping of NitrOS-9 Level 1 (`l1dw`) and Level 2 (`l2dw`) directly from pyDriveWire via `bootos9 /x0/OS9Boot` in FEU.
+
+---
+
 ## 8. Current MAME Implementation Status
 
 | Subsystem | Hardware Emulated | Status |
@@ -506,6 +559,7 @@ A critical architectural distinction between physical FPGA hardware and discrete
 | **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`) | **Completed & Verified** |
 | **Flash ROM & FEU** | Full 64KB FEU (`f0.dsk` @ `$70000`, `booter` @ `$7A000`) | **Completed & Verified** (Standalone Level 1 boot) |
 | **SPI SD Card** | SDC0 shift register, MISO/MOSI, SDHC image boot | **Completed & Verified** (Level 2 boot from `/s0`) |
+| **16550 UART** | Serial registers `$FE60-$FE67`, DLAB divisor, LSR status, 4KB RX FIFO, Host TCP socket bridge (`127.0.0.1:65504`) | **Completed & Verified** (Level 1 and Level 2 DriveWire boot from `/x0`) |
 | **Interrupt Controller**| 4 Groups × 8 sources, dynamic masking & polarity | **Completed & Verified** |
 | **24-bit Timers** | Timer 0 (25.175 MHz dot clock) and Timer 1 (Frame) | **Completed & Verified** |
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
