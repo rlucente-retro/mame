@@ -247,10 +247,10 @@ Group 3 ($FE23 / $FE2F):
 
 ```mermaid
 sequenceDiagram
-    participant FPGA as Hardware Reset (FPGA)
-    participant Flash as Flash Memory (FEU / Level 1)
-    participant SD as SD Card (NitrOS-9 Level 2)
-    participant RAM as System SRAM & MMU
+    participant FPGA as "Hardware Reset (FPGA)"
+    participant Flash as "Flash Memory (FEU / Level 1)"
+    participant SD as "SD Card (NitrOS-9 Level 2)"
+    participant RAM as "System SRAM & MMU"
 
     FPGA->>Flash: 1. Power on / Reset in Flash Mode (Slot 7 to Flash Block $7F)
     Flash->>Flash: 2. 6809 executes reset vector ($FFFE) to trampoline.asm
@@ -555,16 +555,16 @@ The Wildbits Jr2 hardware incorporates a protected software reset mechanism to a
 
 ```mermaid
 sequenceDiagram
-    participant OS as NitrOS-9 / wbreset
-    participant SYS as SYS Control ($FE00-$FE03)
-    participant FPGA as FPGA Global Reset Logic
-    participant CPU as 6809 CPU Core
-    participant MMU as MMU MLUTs
+    participant OS as "NitrOS-9 / wbreset"
+    participant SYS as "SYS Control ($FE00-$FE03)"
+    participant FPGA as "FPGA Global Reset Logic"
+    participant CPU as "6809 CPU Core"
+    participant MMU as "MMU MLUTs"
 
     OS->>SYS: 1. Write $DE to RST0 ($FE02) & $AD to RST1 ($FE03)
     OS->>SYS: 2. Write $80 (SYS_RESET) to SYS0 ($FE00)
     SYS->>FPGA: 3. Key Match ($DEAD) + Trigger Active
-    FPGA->>MMU: 4. Restore default Flash Boot MLUT (Slot 7 -> Block $7F)
+    FPGA->>MMU: 4. Restore default Flash Boot MLUT (Slot 7 to Block $7F)
     FPGA->>CPU: 5. Assert CPU RESET line
     CPU->>CPU: 6. Fetch Reset Vector ($FFFE) from Flash Block $7F (FEU)
     CPU->>OS: 7. Restart Stage 1 Boot (trampoline.asm)
