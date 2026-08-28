@@ -549,6 +549,36 @@ graph TD
 * When the 16550 UART registers are accessed, MAME automatically opens a non-blocking TCP socket to `socket.127.0.0.1:65504` (the default port for `pyDriveWire`).
 * This enables out-of-the-box bootstrapping of NitrOS-9 Level 1 (`l1dw`) and Level 2 (`l2dw`) directly from pyDriveWire via `bootos9 /x0/OS9Boot` in FEU.
 
+### 7.9 System Control & Software Reset Architecture (`$FE00 - $FE03`)
+
+The Wildbits Jr2 hardware incorporates a protected software reset mechanism to allow operating systems and utilities (such as `wbreset`) to perform a clean, cold system reboot without physical power cycling.
+
+```mermaid
+sequenceDiagram
+    participant OS as NitrOS-9 / wbreset
+    participant SYS as SYS Control ($FE00-$FE03)
+    participant FPGA as FPGA Global Reset Logic
+    participant CPU as 6809 CPU Core
+    participant MMU as MMU MLUTs
+
+    OS->>SYS: 1. Write $DE to RST0 ($FE02) & $AD to RST1 ($FE03)
+    OS->>SYS: 2. Write $80 (SYS_RESET) to SYS0 ($FE00)
+    SYS->>FPGA: 3. Key Match ($DEAD) + Trigger Active
+    FPGA->>MMU: 4. Restore default Flash Boot MLUT (Slot 7 -> Block $7F)
+    FPGA->>CPU: 5. Assert CPU RESET line
+    CPU->>CPU: 6. Fetch Reset Vector ($FFFE) from Flash Block $7F (FEU)
+    CPU->>OS: 7. Restart Stage 1 Boot (trampoline.asm)
+```
+
+#### Register Interface:
+* **`$FE02` (`RST0`):** Software Reset Key Byte 0. Must be armed with `$DE`.
+* **`$FE03` (`RST1`):** Software Reset Key Byte 1. Must be armed with `$AD`.
+* **`$FE00` (`SYS0`):** System Control Register 0. Writing bit 7 (`SYS_RESET` = `$80`) when `RST0 == $DE` and `RST1 == $AD` asserts the global hardware reset signal (`rst_n`).
+
+#### Physical Hardware vs. MAME Emulation Alignment:
+* **Physical Hardware:** The FPGA reset logic holds the 6809 CPU core in reset, resets all MMU MLUT mapping registers back to power-on defaults (where Slot 7 maps to high Flash ROM block `$7F`), clears peripheral FIFO queues/controllers, and restarts CPU execution at `$FFFE` pointing into the FEU `trampoline.asm`.
+* **MAME Emulation:** In [`src/mame/wildbits/wildbits_jr2.cpp`](file:///Users/richardlucente/development/git/mame/src/mame/wildbits/wildbits_jr2.cpp), `sys0_w()` detects the `$DEAD` sentinel and invokes `machine().schedule_hard_reset()`. This cleanly schedules a full platform reset cycle, reinitializing all device registers, clearing VRAM/MMU maps, and resetting the 6809 CPU to reload the reset vector from `$FFFE`, maintaining exact parity with physical hardware execution.
+
 ---
 
 ## 8. Current MAME Implementation Status
@@ -557,6 +587,7 @@ graph TD
 | :--- | :--- | :--- |
 | **6809 CPU Core** | Motorola 6809 @ 6.29 MHz | **Completed & Verified** |
 | **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`) | **Completed & Verified** |
+| **System Reset (`wbreset`)** | Armed reset handshake (`$FE02=$DE`, `$FE03=$AD`, `$FE00=$80`), `schedule_hard_reset()` | **Completed & Verified** (Verified cold reboot to FEU) |
 | **Flash ROM & FEU** | Full 64KB FEU (`f0.dsk` @ `$70000`, `booter` @ `$7A000`) | **Completed & Verified** (Standalone Level 1 boot) |
 | **SPI SD Card** | SDC0 shift register, MISO/MOSI, SDHC image boot | **Completed & Verified** (Level 2 boot from `/s0`) |
 | **16550 UART** | Serial registers `$FE60-$FE67`, DLAB divisor, LSR status, 4KB RX FIFO, Host TCP socket bridge (`127.0.0.1:65504`) | **Completed & Verified** (Level 1 and Level 2 DriveWire boot from `/x0`) |
@@ -570,6 +601,3 @@ graph TD
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
 | **TinyVicky Sprites** | 64 hardware sprites with 4 composite layers | *Planned* |
 | **Audio Synthesizers** | Dual PSG (SN76489) + Dual SID (MOS 6581) + WM8776 CODEC | *Planned* |
-
-
-
