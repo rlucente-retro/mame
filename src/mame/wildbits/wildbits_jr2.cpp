@@ -466,7 +466,7 @@ void wildbits_jr2_state::sys0_w(uint8_t data)
 	if ((data & 0x80) && (m_rst0 == 0xde) && (m_rst1 == 0xad))
 	{
 		printf("DEBUG: Software RESET via SYS0! PC=0x%04X\n", m_maincpu->pc());
-		machine_reset();
+		machine().schedule_hard_reset();
 	}
 }
 
