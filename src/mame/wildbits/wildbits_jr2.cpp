@@ -229,10 +229,16 @@ private:
 	void poll_wizfi_socket();
 	void reset_wizfi();
 
+	// Hardware Integer Math Coprocessor ($FEE0 - $FEFB)
+	uint8_t math_r(offs_t offset);
+	void math_w(offs_t offset, uint8_t data);
+
 	// TinyVicky Video handlers ($FFC0 - $FFDF)
 	uint8_t vky_r(offs_t offset);
 	void vky_w(offs_t offset, uint8_t data);
 	void vblank_w(int state);
+	void update_line_timer();
+	TIMER_CALLBACK_MEMBER(scanline_tick);
 
 	void update_banks();
 	uint8_t *get_physical_block_ptr(uint8_t block_num);
@@ -334,6 +340,14 @@ private:
 	int m_wizfi_remote_port;
 	osd_file::ptr m_wizfi_socket;
 
+	// Hardware Integer Math Coprocessor ($FEE0 - $FEFB)
+	uint16_t m_math_mulu_a;
+	uint16_t m_math_mulu_b;
+	uint16_t m_math_divu_den;
+	uint16_t m_math_divu_num;
+	uint32_t m_math_add_a;
+	uint32_t m_math_add_b;
+
 	// TinyVicky Master Registers
 	uint8_t m_vky_mstr_ctrl_0;
 	uint8_t m_vky_mstr_ctrl_1;
@@ -353,6 +367,8 @@ private:
 	uint8_t m_vky_crsr_color;
 	uint16_t m_vky_crsr_x;
 	uint16_t m_vky_crsr_y;
+	uint16_t m_vky_line_cmp;
+	emu_timer *m_scanline_timer;
 
 	// Keyboard Input Ports
 	required_ioport_array<4> m_io_key;
@@ -1555,6 +1571,107 @@ void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 	}
 }
 
+// Hardware Integer Math Coprocessor ($FEE0 - $FEFB)
+uint8_t wildbits_jr2_state::math_r(offs_t offset)
+{
+	switch (offset)
+	{
+	// Input registers readback ($FEE0 - $FEEF)
+	case 0x00: return (m_math_mulu_a >> 8) & 0xff;
+	case 0x01: return m_math_mulu_a & 0xff;
+	case 0x02: return (m_math_mulu_b >> 8) & 0xff;
+	case 0x03: return m_math_mulu_b & 0xff;
+	case 0x04: return (m_math_divu_den >> 8) & 0xff;
+	case 0x05: return m_math_divu_den & 0xff;
+	case 0x06: return (m_math_divu_num >> 8) & 0xff;
+	case 0x07: return m_math_divu_num & 0xff;
+	case 0x08: return (m_math_add_a >> 24) & 0xff;
+	case 0x09: return (m_math_add_a >> 16) & 0xff;
+	case 0x0a: return (m_math_add_a >> 8) & 0xff;
+	case 0x0b: return m_math_add_a & 0xff;
+	case 0x0c: return (m_math_add_b >> 24) & 0xff;
+	case 0x0d: return (m_math_add_b >> 16) & 0xff;
+	case 0x0e: return (m_math_add_b >> 8) & 0xff;
+	case 0x0f: return m_math_add_b & 0xff;
+
+	// Output result registers ($FEF0 - $FEFB)
+	case 0x10: { // MULU_RES HH
+		uint32_t prod = (uint32_t)m_math_mulu_a * (uint32_t)m_math_mulu_b;
+		return (prod >> 24) & 0xff;
+	}
+	case 0x11: { // MULU_RES HL
+		uint32_t prod = (uint32_t)m_math_mulu_a * (uint32_t)m_math_mulu_b;
+		return (prod >> 16) & 0xff;
+	}
+	case 0x12: { // MULU_RES LH
+		uint32_t prod = (uint32_t)m_math_mulu_a * (uint32_t)m_math_mulu_b;
+		return (prod >> 8) & 0xff;
+	}
+	case 0x13: { // MULU_RES LL
+		uint32_t prod = (uint32_t)m_math_mulu_a * (uint32_t)m_math_mulu_b;
+		return prod & 0xff;
+	}
+	case 0x14: { // QUOU_RES H
+		if (m_math_divu_den == 0) return 0xff;
+		return ((m_math_divu_num / m_math_divu_den) >> 8) & 0xff;
+	}
+	case 0x15: { // QUOU_RES L
+		if (m_math_divu_den == 0) return 0xff;
+		return (m_math_divu_num / m_math_divu_den) & 0xff;
+	}
+	case 0x16: { // REMU_RES H
+		if (m_math_divu_den == 0) return (m_math_divu_num >> 8) & 0xff;
+		return ((m_math_divu_num % m_math_divu_den) >> 8) & 0xff;
+	}
+	case 0x17: { // REMU_RES L
+		if (m_math_divu_den == 0) return m_math_divu_num & 0xff;
+		return (m_math_divu_num % m_math_divu_den) & 0xff;
+	}
+	case 0x18: { // ADD_RES HH
+		uint32_t sum = m_math_add_a + m_math_add_b;
+		return (sum >> 24) & 0xff;
+	}
+	case 0x19: { // ADD_RES HL
+		uint32_t sum = m_math_add_a + m_math_add_b;
+		return (sum >> 16) & 0xff;
+	}
+	case 0x1a: { // ADD_RES LH
+		uint32_t sum = m_math_add_a + m_math_add_b;
+		return (sum >> 8) & 0xff;
+	}
+	case 0x1b: { // ADD_RES LL
+		uint32_t sum = m_math_add_a + m_math_add_b;
+		return sum & 0xff;
+	}
+	default:
+		return 0;
+	}
+}
+
+void wildbits_jr2_state::math_w(offs_t offset, uint8_t data)
+{
+	switch (offset)
+	{
+	case 0x00: m_math_mulu_a = (m_math_mulu_a & 0x00ff) | (data << 8); break;
+	case 0x01: m_math_mulu_a = (m_math_mulu_a & 0xff00) | data; break;
+	case 0x02: m_math_mulu_b = (m_math_mulu_b & 0x00ff) | (data << 8); break;
+	case 0x03: m_math_mulu_b = (m_math_mulu_b & 0xff00) | data; break;
+	case 0x04: m_math_divu_den = (m_math_divu_den & 0x00ff) | (data << 8); break;
+	case 0x05: m_math_divu_den = (m_math_divu_den & 0xff00) | data; break;
+	case 0x06: m_math_divu_num = (m_math_divu_num & 0x00ff) | (data << 8); break;
+	case 0x07: m_math_divu_num = (m_math_divu_num & 0xff00) | data; break;
+	case 0x08: m_math_add_a = (m_math_add_a & 0x00ffffff) | ((uint32_t)data << 24); break;
+	case 0x09: m_math_add_a = (m_math_add_a & 0xff00ffff) | ((uint32_t)data << 16); break;
+	case 0x0a: m_math_add_a = (m_math_add_a & 0xffff00ff) | ((uint32_t)data << 8); break;
+	case 0x0b: m_math_add_a = (m_math_add_a & 0xffffff00) | (uint32_t)data; break;
+	case 0x0c: m_math_add_b = (m_math_add_b & 0x00ffffff) | ((uint32_t)data << 24); break;
+	case 0x0d: m_math_add_b = (m_math_add_b & 0xff00ffff) | ((uint32_t)data << 16); break;
+	case 0x0e: m_math_add_b = (m_math_add_b & 0xffff00ff) | ((uint32_t)data << 8); break;
+	case 0x0f: m_math_add_b = (m_math_add_b & 0xffffff00) | (uint32_t)data; break;
+	default: break;
+	}
+}
+
 // TinyVicky Master Registers ($FFC0 - $FFDF)
 uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 {
@@ -1580,6 +1697,10 @@ uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 	case 0x15: return m_vky_crsr_x & 0xff;
 	case 0x16: return m_vky_crsr_y >> 8;
 	case 0x17: return m_vky_crsr_y & 0xff;
+	case 0x18: return m_screen->hpos() >> 8;   // RAST_COL_H
+	case 0x19: return m_screen->hpos() & 0xff; // RAST_COL_L
+	case 0x1a: return m_screen->vpos() >> 8;   // RAST_ROW_H
+	case 0x1b: return m_screen->vpos() & 0xff; // RAST_ROW_L
 	default: return 0;
 	}
 }
@@ -1608,7 +1729,40 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 	case 0x15: m_vky_crsr_x = (m_vky_crsr_x & 0xff00) | data; break;
 	case 0x16: m_vky_crsr_y = (m_vky_crsr_y & 0x00ff) | (data << 8); break;
 	case 0x17: m_vky_crsr_y = (m_vky_crsr_y & 0xff00) | data; break;
+	case 0x18:
+		m_vky_line_cmp = (m_vky_line_cmp & 0x00ff) | (data << 8); // LINE_CMP_H
+		update_line_timer();
+		break;
+	case 0x19:
+		m_vky_line_cmp = (m_vky_line_cmp & 0xff00) | data;        // LINE_CMP_L
+		update_line_timer();
+		break;
 	default: break;
+	}
+}
+
+void wildbits_jr2_state::update_line_timer()
+{
+	if (m_vky_line_cmp < 525)
+	{
+		m_scanline_timer->adjust(m_screen->time_until_pos(m_vky_line_cmp, 0));
+	}
+	else
+	{
+		m_scanline_timer->adjust(attotime::never);
+	}
+}
+
+TIMER_CALLBACK_MEMBER(wildbits_jr2_state::scanline_tick)
+{
+	set_irq(0, 0x02); // INT_VKY_SOL (Group 0, Bit 1)
+	if (m_vky_line_cmp < 525)
+	{
+		m_scanline_timer->adjust(m_screen->time_until_pos(m_vky_line_cmp, 0));
+	}
+	else
+	{
+		m_scanline_timer->adjust(attotime::never);
 	}
 }
 
@@ -1671,6 +1825,9 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 	// $FE90-$FE91: SPI SD Card Controller
 	map(0xfe90, 0xfe90).rw(FUNC(wildbits_jr2_state::sdc_stat_r), FUNC(wildbits_jr2_state::sdc_stat_w));
 	map(0xfe91, 0xfe91).rw(FUNC(wildbits_jr2_state::sdc_data_r), FUNC(wildbits_jr2_state::sdc_data_w));
+
+	// $FEE0-$FEFB: Hardware Integer Math Coprocessor
+	map(0xfee0, 0xfefb).rw(FUNC(wildbits_jr2_state::math_r), FUNC(wildbits_jr2_state::math_w));
 
 	// $FF20-$FF2F: WizFi360 WiFi / SPI Controller
 	map(0xff20, 0xff2f).rw(FUNC(wildbits_jr2_state::wizfi_r), FUNC(wildbits_jr2_state::wizfi_w));
@@ -1900,6 +2057,15 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_vky_crsr_color));
 	save_item(NAME(m_vky_crsr_x));
 	save_item(NAME(m_vky_crsr_y));
+	save_item(NAME(m_vky_line_cmp));
+	save_item(NAME(m_math_mulu_a));
+	save_item(NAME(m_math_mulu_b));
+	save_item(NAME(m_math_divu_den));
+	save_item(NAME(m_math_divu_num));
+	save_item(NAME(m_math_add_a));
+	save_item(NAME(m_math_add_b));
+
+	m_scanline_timer = timer_alloc(FUNC(wildbits_jr2_state::scanline_tick), this);
 }
 
 void wildbits_jr2_state::machine_reset()
@@ -1923,6 +2089,18 @@ void wildbits_jr2_state::machine_reset()
 	m_sys1 = 0x00;
 	m_rst0 = 0x00;
 	m_rst1 = 0x00;
+
+	// Reset Math Coprocessor
+	m_math_mulu_a = 0;
+	m_math_mulu_b = 0;
+	m_math_divu_den = 0;
+	m_math_divu_num = 0;
+	m_math_add_a = 0;
+	m_math_add_b = 0;
+
+	// Reset Video line compare
+	m_vky_line_cmp = 0xffff;
+	m_scanline_timer->adjust(attotime::never);
 
 	// Reset Interrupt Controller (all IRQs masked by default)
 	for (int g = 0; g < 4; g++)

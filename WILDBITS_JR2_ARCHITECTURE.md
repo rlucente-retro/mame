@@ -581,6 +581,60 @@ sequenceDiagram
 
 ---
 
+### 7.10 Hardware Integer Math Coprocessor Architecture (`$FEE0 - $FEFB`)
+
+The Wildbits Jr2 incorporates an integer math accelerator inside the Artix-7 FPGA providing hardware-accelerated 16×16 multiplication, division with remainder, and 32-bit addition:
+
+```
++---------------------------------------------------------------------------------------+
+|                    HARDWARE INTEGER MATH COPROCESSOR ($FEE0 - $FEFB)                 |
++---------------------------------------------------------------------------------------+
+|  Operands (Write):                                  Results (Combinational Read):     |
+|  - $FEE0-$FEE1: MULU_A (16-bit)                     - $FEF0-$FEF3: MULU_RES (32-bit)  |
+|  - $FEE2-$FEE3: MULU_B (16-bit)                                                       |
+|  - $FEE4-$FEE5: DIVU_DEN (16-bit Divisor)           - $FEF4-$FEF5: QUOU_RES (16-bit)  |
+|  - $FEE6-$FEE7: DIVU_NUM (16-bit Dividend)          - $FEF6-$FEF7: REMU_RES (16-bit)  |
+|  - $FEE8-$FEEB: ADD_A (32-bit)                      - $FEF8-$FEFB: ADD_RES (32-bit)   |
+|  - $FEEC-$FEEF: ADD_B (32-bit)                                                        |
++---------------------------------------------------------------------------------------+
+```
+
+#### Register Interface & Big-Endian Alignment:
+* **`$FEE0-$FEE3` $\rightarrow$ `$FEF0-$FEF3` (Unsigned 16×16 $\rightarrow$ 32-bit Multiplication):**
+  * `MULU_A` (`$FEE0` High, `$FEE1` Low) and `MULU_B` (`$FEE2` High, `$FEE3` Low).
+  * Product available immediately at `$FEF0-$FEF3` (`HH`, `HL`, `LH`, `LL`).
+  * 6809 assembly: `STD $FEE0` / `STD $FEE2` $\rightarrow$ `LDD $FEF0` / `LDX $FEF2`.
+* **`$FEE4-$FEE7` $\rightarrow$ `$FEF4-$FEF7` (Unsigned 16/16 $\rightarrow$ 16-bit Quotient & Remainder):**
+  * `DIVU_DEN` (`$FEE4-$FEE5`) and `DIVU_NUM` (`$FEE6-$FEE7`).
+  * `QUOU_RES` at `$FEF4-$FEF5` and `REMU_RES` at `$FEF6-$FEF7`.
+  * **Divide-by-Zero Guard:** When denominator = 0, hardware and emulation return saturated quotient (`$FFFF`) and remainder = numerator with zero host exceptions.
+* **`$FEE8-$FEEF` $\rightarrow$ `$FEF8-$FEFB` (Unsigned 32-bit Addition):**
+  * `ADD_A` (`$FEE8-$FEEB`) + `ADD_B` (`$FEEC-$FEEF`) $\rightarrow$ `ADD_RES` (`$FEF8-$FEFB`) with carry propagation.
+
+---
+
+### 7.11 TinyVicky Raster Beam Counters & Line Interrupt Architecture (`$FFD8 - $FFDB`)
+
+TinyVicky II provides real-time raster beam tracking and a programmable scanline comparator interrupt (`INT_VKY_SOL` on Interrupt Group 0, bit 1):
+
+```
++---------------------------------------------------------------------------------------+
+|                    RASTER BEAM TRACKING & LINE INTERRUPTS ($FFD8 - $FFDB)             |
++---------------------------------------------------------------------------------------+
+|  Read:                                              Write:                            |
+|  - $FFD8-$FFD9: RAST_COL (0..799 Dot Clock Beam X)  - $FFD8-$FFD9: LINE_CMP (0..524) |
+|  - $FFDA-$FFDB: RAST_ROW (0..524 Scanline Beam Y)   (Triggers INT_VKY_SOL at target)  |
++---------------------------------------------------------------------------------------+
+```
+
+#### Operating Characteristics:
+* **Continuous Beam Monitoring:** Reading `RAST_ROW` (`$FFDA-$FFDB`) returns the current active vertical scanline (0..479 in 60Hz mode, 0..399 in 70Hz mode, advancing through VBLANK to 524 before frame reset). `RAST_COL` (`$FFD8-$FFD9`) returns the horizontal dot clock pixel position (0..799).
+* **Event-Driven Line Interrupt Scheduling:** Writing `LINE_CMP` (`$FFD8-$FFD9`) programs a hardware comparator target. When the raster beam reaches the target scanline, `INT_VKY_SOL` (`Group 0, bit 1`) is asserted.
+* **Multi-Split / Raster Synchronized Effects:** Mid-frame dynamic reprogramming allows multiple split-screen raster interrupts per frame (e.g., palette changes, scrolling splits, or status bars).
+* **Zero-Overhead Idle State:** When unprogrammed (`LINE_CMP = $FFFF`), the emulation timer is disabled (`attotime::never`), ensuring zero CPU overhead while preserving jitter-free beam position reads.
+
+---
+
 ## 8. Current MAME Implementation Status
 
 | Subsystem | Hardware Emulated | Status |
@@ -597,7 +651,10 @@ sequenceDiagram
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
 | **PS/2 Keyboard** | Host matrix mapped to PS/2 Set 2 scan codes (make/break) | **Completed & Verified** (Interactive typing) |
 | **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Transparent Mode, Socket Bridge | **Completed & Verified** (Verified against physical hardware: firmware v1.1.2.0, WIZnet MAC formatting, auto-connect reset banner, transparent streaming, `+++` escape detector, `+IPD` packet framing, and host BSD/POSIX socket bridge for NitrOS-9 driver and FujiNet/DriveWire) |
+| **Math Coprocessor** | Hardware 16x16 unsigned multiplication, 32/16 division & remainder, 32-bit addition at `$FEE0-$FEFB` | **Completed & Verified** (Verified via NitrOS-9 `mathtest` suite with saturation & divide-by-zero guards) |
+| **Raster Beam & Line IRQ** | TinyVicky `RAST_COL`/`RAST_ROW` beam counters and `LINE_CMP` interrupt (`INT_VKY_SOL`) at `$FFD8-$FFDB` | **Completed & Verified** (Verified via NitrOS-9 `beamtest` scanline monitor) |
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) | *Planned* |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
 | **TinyVicky Sprites** | 64 hardware sprites with 4 composite layers | *Planned* |
+| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* |
 | **Audio Synthesizers** | Dual PSG (SN76489) + Dual SID (MOS 6581) + WM8776 CODEC | *Planned* |
