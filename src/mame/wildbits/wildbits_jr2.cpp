@@ -2060,7 +2060,7 @@ void wildbits_jr2_state::wbjr2(machine_config &config)
 	m_sdcard->spi_miso_callback().set(FUNC(wildbits_jr2_state::sdcard_miso_w));
 
 	// Video Screen: 640x480 @ 60Hz
-	SCREEN(config, m_screen);
+	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
 	m_screen->set_raw(XTAL(25'175'000), 800, 0, 640, 525, 0, 480);
 	m_screen->set_screen_update(FUNC(wildbits_jr2_state::screen_update));
 	m_screen->screen_vblank().set(FUNC(wildbits_jr2_state::vblank_w));
