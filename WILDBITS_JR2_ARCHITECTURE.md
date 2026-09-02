@@ -1016,29 +1016,84 @@ The physical Jr2 motherboard provides hardware DIP switches read through fixed I
 
 ---
 
-## 8. Current MAME Implementation Status
+## 8. Current MAME Implementation Status & Parity Gap Analysis
 
-| Subsystem | Hardware Emulated | Status |
-| :--- | :--- | :--- |
-| **6809 CPU Core** | Motorola 6809 @ 6.29 MHz (FNX6809 core) | **Completed & Verified** |
-| **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`), Slot-2 work window | **Completed & Verified** |
-| **System Reset (`wbreset`)** | Armed reset handshake (`$FE02=$DE`, `$FE03=$AD`, `$FE00=$80`), `schedule_hard_reset()` | **Completed & Verified** (Verified cold reboot to FEU) |
-| **Flash ROM & FEU** | Full 64KB FEU (`f0.dsk` @ `$70000`, `booter` @ `$7A000`), `/f1` user flash | **Completed & Verified** (Standalone Level 1 boot) |
-| **SPI SD Card** | SDC0 shift register, MISO/MOSI, SDHC image boot | **Completed & Verified** (Level 2 boot from `/s0`) |
-| **16550 UART** | Serial registers `$FE60-$FE67`, BAUDCE 22.1184MHz clocking (Divisor 5 = 230,400 baud), 4KB RX FIFO, Host TCP socket bridge (`127.0.0.1:65504`) | **Completed & Verified** (Level 1 and Level 2 DriveWire boot from `/x0`) |
-| **Interrupt Controller**| 4 Groups × 8 sources (`IRQ_Controller_Jr.v`), W1C latches, mask/polarity/edge | **Completed & Verified** |
-| **24-bit Timers** | Timer 0 (25.175 MHz dot clock) and Timer 1 (Frame) | **Completed & Verified** |
-| **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** (Yellow on Purple) |
-| **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** |
-| **PS/2 Keyboard** | Host matrix mapped to PS/2 Set 2 scan codes (make/break) | **Completed & Verified** (Interactive typing) |
-| **WizFi360 Wi-Fi** | Dual 2KB FIFOs, AT Command Engine, Group 3 FIFO interrupts, Transparent Mode, Socket Bridge | **Completed & Verified** (Verified against physical hardware: firmware v1.1.2.0, WIZnet MAC formatting, auto-connect reset banner, transparent streaming, `+++` escape detector, `+IPD` packet framing, and host BSD/POSIX socket bridge for NitrOS-9 driver and FujiNet/DriveWire) |
-| **Math Coprocessor** | Hardware 16x16 unsigned multiplication, 32/16 division & remainder, 32-bit addition at `$FEE0-$FEFB` | **Completed & Verified** (Verified via NitrOS-9 `mathtest` suite with saturation & divide-by-zero guards) |
-| **Raster Beam & Line IRQ** | TinyVicky `RAST_COL`/`RAST_ROW` beam counters and `LINE_CMP` interrupt (`INT_VKY_SOL`) at `$FFD8-$FFDB` | **Completed & Verified** (Verified via NitrOS-9 `beamtest` scanline monitor) |
-| **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) | *Planned* |
-| **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling | *Planned* |
-| **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) with 4 graphics CLUTs, scanned 127..0 per line pair | *Planned* |
-| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* |
-| **Audio Synthesizers** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI | *Planned* |
+### 8.1 Implementation Status Matrix
+
+| Subsystem | Hardware Specification | Current Emulator Status | Parity Gap / Action Required |
+| :--- | :--- | :--- | :--- |
+| **6809 CPU Core** | Motorola 6809 @ 6.29 MHz (FNX6809 core) | **Completed & Verified** | None; boots NitrOS-9 Level 1 & 2. |
+| **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`) | **Needs Revision** | `mmu_slot_r/w` has a defect where `EDIT_LUT == 0` falls back to `ACTIVE_LUT`. Should strictly access `(m_mmu_mem_ctrl >> 4) & 0x03`. Blocks `$80–$9F` alias to general RAM instead of Cartridge decode. |
+| **System Reset (`wbreset`)** | Armed handshake (`$FE02=$DE`, `$FE03=$AD`, `$FE00=$80`) | **Completed & Verified** | Verified cold reboot to FEU. |
+| **Flash ROM & FEU** | 512KB visibility window (`f0.dsk` @ `$70000`, booter @ `$7A000`, `/f1` user flash) | **Completed & Verified** | Standalone Level 1 boot and `/f1` access. |
+| **SPI SD Card** | SDC0 shift register (`$FE90-$FE91`), SDHC image boot | **Completed & Verified** | Verified Level 2 boot from `/s0`. SDC1 (`$FF00`) is unmapped (Planned). |
+| **16550 UART** | Serial registers `$FE60-$FE67`, BAUDCE 22.1184MHz clocking, Host TCP bridge | **Needs Revision** | DriveWire socket bridge works, but `INT_UART` (Group 1 bit 0) is never asserted in `uart_r/w`. |
+| **Interrupt Controller**| 4 Groups × 8 sources (`IRQ_Controller_Jr.v`), W1C latches, mask/polarity/edge | **Needs Revision** | INTC core logic is implemented, but multiple peripheral IRQ sources (WizFi, UART, RTC, Cartridge) are never connected via `set_irq()`. |
+| **24-bit Timers** | Timer 0 (25.175 MHz dot clock) and Timer 1 (Frame) | **Completed & Verified** | Compares, values, and Group 0 IRQs verified. |
+| **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** | Yellow on Purple authentic NitrOS-9 display. |
+| **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** | Inversion at cursor position verified. |
+| **PS/2 Keyboard & Mouse** | Host matrix to PS/2 Set 2 scan codes at `$FE50-$FE54` | **Completed & Verified** | Interactive typing and mouse packet FIFO verified. |
+| **Real-Time Clock (RTC)** | bq4802 RTC registers at `$FE40-$FE4F` | **Needs Revision** | **Critical Defect:** MAME erroneously maps RTC at `$FE10-$FE1F` instead of `$FE40-$FE4F`. `$FE40` is unmapped; OS `setime` / clock reads fail. |
+| **Hardware DIP Switches** | Motherboard DIP switches at `$FF90` (Gamma, Turbo stretch ~1.4x, boot modes) | **Needs Revision** | `$FF90` is currently unmapped. |
+| **WizFi360 Wi-Fi** | Dual 2KB FIFOs at `$FF20-$FF29`, AT command engine, socket bridge | **Needs Revision** | AT command engine and socket streaming work, but Group 3 interrupts (`INT_WIZFI_RX` bit 0, `INT_WIZFI_TX` bit 5) are never asserted via `set_irq()`. |
+| **WDC 65C22 VIA 0** | VIA 0 at `$FEB0-$FEBF` driving Atari DE-9 joystick ports | **Planned / Unmapped** | `$FEB0` is currently unmapped in MAME. |
+| **Math Coprocessor** | Hardware 16x16 multiply, 32/16 divide, 32-bit addition at `$FEE0-$FEFB` | **Completed & Verified** | Verified via NitrOS-9 `mathtest` suite with saturation & divide-by-zero guards. |
+| **Raster Beam & Line IRQ** | TinyVicky `RAST_COL`/`RAST_ROW` and `LINE_CMP` interrupt (`INT_VKY_SOL`) | **Completed & Verified** | Verified via NitrOS-9 `beamtest` scanline monitor. |
+| **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) in Page `$C0` at `$1000-$1013` | *Planned* | Not yet rendered in `screen_update`. |
+| **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling in Page `$C0` at `$1100-$1123` | *Planned* | Not yet rendered in `screen_update`. |
+| **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF` | *Planned* | Not yet rendered in `screen_update`. |
+| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* | `$FEC0` is unmapped. |
+| **Audio Synthesizers** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI | *Planned* | MAME currently runs with `MACHINE_NO_SOUND_HW`. |
+
+---
+
+### 8.2 Technical Gaps Requiring Emulator Revision
+
+Before implementing new graphics and sound hardware, the existing MAME emulator (`wildbits_jr2.cpp`) requires revision across several core peripheral and memory mapping areas to achieve authentic hardware parity:
+
+#### 1. Relocate Real-Time Clock (RTC) from `$FE10` to `$FE40-$FE4F`:
+* **The Defect:** In `wbjr2_mem()`, line 1808 maps the bq4802 RTC across `$FE10-$FE1F`. On the physical Wildbits Jr2, `$FE10-$FE16` is the K2 optical keyboard scanner (unpopulated on Jr2), while the RTC is mapped at **`$FE40-$FE4F`** (`RTC.Base` in `defs/wildbits.d` and hardware memory map).
+* **Impact:** Any OS utility attempting to query or set the hardware clock (`setime`, `clock`) reads/writes unmapped bus space, while probing `$FE10` accesses the RTC rather than unmapped space.
+* **Required Revision:** Change the address map entry from `map(0xfe10, 0xfe1f)` to `map(0xfe40, 0xfe4f)`.
+
+#### 2. Correct MMU Slot Register Edit-LUT Decoding:
+* **The Defect:** In `mmu_slot_r()` and `mmu_slot_w()`, the code selects the target LUT using:
+  ```cpp
+  uint8_t lut = ((m_mmu_mem_ctrl & 0x80) || (m_mmu_mem_ctrl & 0x30)) ? ((m_mmu_mem_ctrl >> 4) & 0x03) : (m_mmu_mem_ctrl & 0x03);
+  ```
+  This incorrectly assumes that when bits 5:4 are zero (`EDIT_LUT == 0`), the register access should fall back to `ACTIVE_LUT` (`m_mmu_mem_ctrl & 0x03`).
+* **Hardware Truth:** In `TyVKy2_MMU_Register.v`, `assign edit_lut = mmu_mem_ctrl[5:4];`. Accesses to `$FFA8-$FFAF` *always* target `edit_lut`, regardless of whether `edit_lut` is 0, 1, 2, or 3.
+* **Required Revision:** Simplify the LUT selector to:
+  ```cpp
+  uint8_t lut = (m_mmu_mem_ctrl >> 4) & 0x03;
+  ```
+
+#### 3. Implement WizFi360 Group 3 Hardware Interrupts:
+* **The Defect:** While the WizFi360 AT engine and socket bridge handle transparent data transfers, MAME never asserts the Group 3 interrupt lines (`INT_WIZFI_RX` on bit 0 and `INT_WIZFI_TX` on bit 5).
+* **Impact:** Operating systems or drivers relying on interrupt-driven FIFO management rather than continuous polling cannot detect incoming network packets.
+* **Required Revision:**
+  * When incoming network bytes are pushed into the RX FIFO in `poll_wizfi_socket()` or `push_wizfi_response()`, call `set_irq(3, 0x01)` (`INT_WIZFI_RX`).
+  * When the TX FIFO drains completely in `handle_cipsend()`, call `set_irq(3, 0x20)` (`INT_WIZFI_TX`).
+
+#### 4. Map Hardware DIP Switches at `$FF90`:
+* **The Defect:** Fixed I/O register `$FF90` (`K2_DIP_SW.Base`) is currently unmapped.
+* **Impact:** Drivers or utilities probing boot configuration, hardware Gamma enable default (`bit 7`), or Turbo stretch mode status (`bit 6`) cannot read system configuration.
+* **Required Revision:** Add a read handler for `$FF90` connected to MAME DIP switch input ports (`PORT_START("DIPSW")`).
+
+#### 5. Hook Up 16550 UART Hardware Interrupt (`INT_UART`):
+* **The Defect:** In `uart_w()` and `poll_uart_socket()`, data reception and transmission never call `set_irq(1, 0x01)` (`INT_UART` on Group 1, bit 0).
+* **Impact:** Interrupt-driven serial communications under NitrOS-9 or communications programs cannot receive characters via IRQ.
+* **Required Revision:** Assert `set_irq(1, 0x01)` when bytes enter `m_uart_rx_fifo` and `m_uart_ier & 0x01` is enabled; clear when the RX FIFO is emptied or `IIR` is read.
+
+#### 6. Differentiate Cartridge Decode Blocks `$80–$9F` in Physical Memory:
+* **The Defect:** In `get_physical_block_ptr()`, block numbers `$80–$9F` fall through to general SRAM.
+* **Impact:** Cartridges `/c0` and `/c1` cannot be mounted as separate flash/ROM media, and attempts to write to cartridge blocks bypass the external bus write strobe policy.
+* **Required Revision:** Allocate dedicated cartridge window memory or connect to MAME cartridge image devices for `/c0` and `/c1`.
+
+#### 7. Map WDC 65C22 VIA 0 at `$FEB0-$FEBF`:
+* **The Defect:** `$FEB0-$FEBF` is currently unmapped.
+* **Impact:** Joystick ports 0 and 1 (connected to VIA0 Port B and Port A) and user GPIO are unavailable.
+* **Required Revision:** Instantiate a `MOS6522` / `W65C22` device at `$FEB0-$FEBF` in `wbjr2_mem()`.
 
 ---
 
