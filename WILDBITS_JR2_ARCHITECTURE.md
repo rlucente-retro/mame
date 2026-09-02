@@ -725,20 +725,21 @@ The emulation has been directly verified against the physical WIZnet WizFi360 ha
 
 ### 7.7 Interrupt Architecture, Timing Fidelity & Emulation Scheduling
 
-A critical architectural distinction between physical FPGA hardware and discrete software emulators occurs in high-frequency interrupt scheduling:
+#### 1. Hardware Interrupt Architecture (Jr2 vs. K2):
+* **WizFi Wi-Fi Interrupts on Jr2 (`v8_rc3`+ / `v8_rc7`):** In modern FPGA cores (`IRQ_Controller_Jr.v` lines 153–156), the Wildbits Jr2 wires the WizFi360 hardware FIFOs directly to **Group 3**:
+  * **Group 3, Bit 0 (`INT_WIZFI_RX`):** `NEW_Rx_FIFO_WIFI_Sync` — asserts immediately whenever incoming network bytes enter the 2KB RX FIFO.
+  * **Group 3, Bit 5 (`INT_WIZFI_TX`):** `Tx_FIFO_Empty_WIFI_Sync` — asserts when the 2KB TX FIFO drains to empty.
+* **Interrupt Distinctions Between Jr2 and K2:**
+  * **Keyboard Interface:** The Wildbits Jr2 uses an external **PS/2 Keyboard** wired to **Group 0, bit 2** (`INT_PS2_KBD`). The Wildbits K2 uses an integrated optical keyboard scanner with hardware typematic repeat wired to **Group 3, bit 2** (`NEW_Optical_Kbd_Sync`). On the Jr2, Group 3 bit 2 is **unpopulated**.
+  * **Ethernet Interface:** The Wildbits K2 equips an onboard WIZnet W6100 Ethernet chip wired to **Group 2, bit 4** (`INT_ETHERNET`) and **Group 3, bit 3** (`INT_WIZNET_FIFO`). On the Wildbits Jr2, the W6100 is absent and both interrupt lines are **unpopulated**.
+  * **Secondary VIA:** `VIA1` at `$FFB0` (Group 1, bit 6) is **unpopulated** on the Jr2.
 
-#### 1. Physical Hardware Timing:
-* **The 25.175 MHz Hardware Timer:** The Artix-7 FPGA implements a 24-bit up-counter incrementing at the 25.175 MHz dot clock. When `wizfi.asm` programs `TRATE = 2185` (to match theoretical single-byte arrival time at 115200 baud), the timer reaches compare match every 2185 ÷ 4 = **546 CPU cycles** at 6.29 MHz (11,521.7 ticks/sec).
-* **Hardware Differences Between K2 and Jr2:**
-  * **Wildbits K2 (`$16`):** Features a dedicated, event-driven hardware interrupt (`INT_WIZFI` on Group 3) that only triggers when bytes are present in the FIFO. The driver uses `iThrottle` to mask interrupts when the buffer is full and unmasks on read. Background CPU utilization is < 1%.
-  * **Wildbits Jr2 (`$1A`):** Does not have the hardware Wi-Fi interrupt line populated. Instead, it relies on continuous background polling via Timer 0 (`INT_TIMER_0` on Group 0).
-
-#### 2. The High-Frequency Polling Cascade:
-* **NitrOS-9 Interrupt Overhead:** The 6809 interrupt entry (12-byte register push, vector fetch from `$FFF8`), kernel `krn.asm` `XIRQ` mapping, `clock.asm` `DoPoll` loop, `ioman.asm` `IRQPoll` table traversal, `wizfi.asm` `iService` execution, and `RTI` require ≈ 406 CPU cycles per tick.
-* **CPU Starvation at 11.52 kHz:** At 546 cycles/tick, IRQ dispatch consumes ≈ 75% of total 6809 CPU cycles. During boot (`startup`), when the OS performs hundreds of SPI SD card sector reads (`llwbsd`), interrupting the CPU every 35 instructions drops disk and foreground throughput to a crawl, appearing as a hang on console.
+#### 2. Network Driver Scheduling (Legacy Polling vs. Modern 60 Hz VIRQ):
+* **Historical Timer 0 Polling:** Early development cores (prior to `Core2x` / `v8_rc3`) lacked wired FIFO interrupts on Jr2, forcing early drivers to poll the WizFi status registers at high frequency via 24-bit Timer 0 (`INT_TIMER_0` on Group 0 at ~11.5 kHz). Because 6809 interrupt dispatch overhead (register push, vector fetch, kernel `krn.asm` `XIRQ` mapping, poll table traversal, and `RTI`) requires ~406 cycles per tick, high-frequency timer interrupts consumed up to ~75% of CPU time during SD card transfers.
+* **Modern Hardened Architecture (`wb/wizfi_tx_packets`, CRC `$E1BEA2`):** Modern NitrOS-9 releases completely eliminate Timer 0 polling on both Jr2 and K2! The driver utilizes a repeating 1-tick **`F$VIRQ`** on the 60 Hz vertical blank clock (`TickSvc`) to batch socket TX bytes into coalesced `AT+CIPSEND` bursts, flushes early when the ring reaches threshold (`TXTHRESH = 192` bytes), and filters interleaved receive data via `HsPop`.
 
 #### 3. Emulation Timing Optimization (1 kHz Scheduling Floor):
-* **1 kHz Scheduling Period Floor:** In MAME's `timer0_tick` and `timer_w`, Timer 0 compare intervals are clamped to a minimum period of **1 ms (1 kHz maximum frequency)**:
+* **1 kHz Timer 0 Period Floor:** To protect host CPU efficiency against legacy OS binaries or user programs that still program extreme high-frequency Timer 0 compare intervals, MAME clamps Timer 0 intervals to a minimum period of **1 ms (1 kHz maximum frequency)**:
   ```cpp
   attotime period = attotime::from_hz(25'175'000) * m_t0_cmp;
   if (period < attotime::from_hz(1000))
@@ -747,8 +748,8 @@ A critical architectural distinction between physical FPGA hardware and discrete
   ```
 * **Fidelity & Performance Impact:**
   * **Registers & Protocol:** All hardware registers (`$FE30-$FE37`, `$FF20-$FF29`), compare registers, status flags (`T0_STAT`), and interrupt pending bits operate identically to physical hardware.
-  * **Zero Data Loss:** The WizFi360 hardware FIFO holds 2,048 bytes (2KB). At 115,200 baud, at most ≈ 11.5 bytes arrive per millisecond, which easily buffers without overrun.
-  * **Throughput & Responsiveness:** Reduces IRQ overhead from ≈ 75% to ≈ 6.5%, giving > 93% CPU capacity to the shell and disk drivers, enabling instant boots and zero-latency keyboard typing.
+  * **Zero Data Loss:** The WizFi360 hardware FIFO holds 2,048 bytes (2 KB). At 115,200 baud, at most ~11.5 bytes arrive per millisecond, buffering comfortably without overrun.
+  * **Throughput & Responsiveness:** Reduces IRQ overhead from ~75% to < 7%, leaving > 93% CPU capacity for system disk I/O and interactive terminal sessions.
 
 ---
 
