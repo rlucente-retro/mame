@@ -150,6 +150,7 @@ public:
 		, m_flash(*this, "flash")
 		, m_bank(*this, "bank%u", 0U)
 		, m_io_key(*this, "KEY%u", 0U)
+		, m_dipsw(*this, "DIPSW")
 		, m_frame_count(0)
 	{ }
 
@@ -182,7 +183,7 @@ private:
 	void rst1_w(uint8_t data);
 	uint8_t mid_r();
 
-	// Real-Time Clock ($FE10 - $FE1F)
+	// Real-Time Clock ($FE40 - $FE4F)
 	uint8_t rtc_r(offs_t offset);
 	void rtc_w(offs_t offset, uint8_t data);
 
@@ -208,7 +209,7 @@ private:
 	void uart_w(offs_t offset, uint8_t data);
 	void poll_uart_socket();
 
-	// Audio CODEC ($FE70 - $FE72)
+	// Audio CODEC ($FE70 - $FE72: WM8776)
 	uint8_t codec_r(offs_t offset);
 	void codec_w(offs_t offset, uint8_t data);
 
@@ -218,6 +219,9 @@ private:
 	uint8_t sdc_data_r();
 	void sdc_data_w(uint8_t data);
 	void sdcard_miso_w(int state);
+
+	// Hardware Configuration DIP Switches ($FF90)
+	uint8_t dipsw_r();
 
 	// WizFi360 WiFi / SPI ($FF20 - $FF2F)
 	uint8_t wizfi_r(offs_t offset);
@@ -251,6 +255,8 @@ private:
 
 	// Memory structures
 	std::unique_ptr<uint8_t[]> m_ram;        // 512KB SRAM
+	std::unique_ptr<uint8_t[]> m_cart;       // 256KB Cartridge port decode ($80 - $9F)
+	std::unique_ptr<uint8_t[]> m_unmapped;   // 8KB dummy unmapped page
 	std::unique_ptr<uint8_t[]> m_vram_c0;     // Block $C0: VICKY control & gamma
 	std::unique_ptr<uint8_t[]> m_vram_c1;     // Block $C1: Font RAM & Palettes
 	std::unique_ptr<uint8_t[]> m_vram_c2;     // Block $C2: Text Character Matrix
@@ -370,8 +376,9 @@ private:
 	uint16_t m_vky_line_cmp;
 	emu_timer *m_scanline_timer;
 
-	// Keyboard Input Ports
+	// Keyboard & DIP Switch Input Ports
 	required_ioport_array<4> m_io_key;
+	required_ioport m_dipsw;
 	uint16_t m_key_state[4];
 	uint32_t m_frame_count;
 };
@@ -384,6 +391,7 @@ uint8_t *wildbits_jr2_state::get_physical_block_ptr(uint8_t block_num)
 	// 21-bit physical space: 8KB per block
 	// Blocks 0x00 - 0x3F (0x000000 - 0x07FFFF): 512KB SRAM
 	// Blocks 0x40 - 0x7F (0x080000 - 0x0FFFFF): 512KB Flash ROM
+	// Blocks 0x80 - 0x9F (0x100000 - 0x13FFFF): 256KB Cartridge Port (/c0, /c1)
 	// Blocks 0xC0 - 0xC4: Dedicated Video and Audio Block buffers
 	if (block_num < 0x40)
 	{
@@ -392,6 +400,10 @@ uint8_t *wildbits_jr2_state::get_physical_block_ptr(uint8_t block_num)
 	else if (block_num < 0x80)
 	{
 		return &m_flash[(block_num - 0x40) * 0x2000];
+	}
+	else if (block_num >= 0x80 && block_num < 0xa0)
+	{
+		return &m_cart[(block_num - 0x80) * 0x2000];
 	}
 	else if (block_num == 0xc0)
 	{
@@ -415,7 +427,7 @@ uint8_t *wildbits_jr2_state::get_physical_block_ptr(uint8_t block_num)
 	}
 	else
 	{
-		return &m_ram[(block_num & 0x3f) * 0x2000];
+		return m_unmapped.get();
 	}
 }
 
@@ -452,13 +464,13 @@ void wildbits_jr2_state::mmu_io_ctrl_w(uint8_t data)
 
 uint8_t wildbits_jr2_state::mmu_slot_r(offs_t offset)
 {
-	uint8_t lut = ((m_mmu_mem_ctrl & 0x80) || (m_mmu_mem_ctrl & 0x30)) ? ((m_mmu_mem_ctrl >> 4) & 0x03) : (m_mmu_mem_ctrl & 0x03);
+	uint8_t lut = (m_mmu_mem_ctrl >> 4) & 0x03;
 	return m_mlut[lut][offset & 0x07];
 }
 
 void wildbits_jr2_state::mmu_slot_w(offs_t offset, uint8_t data)
 {
-	uint8_t lut = ((m_mmu_mem_ctrl & 0x80) || (m_mmu_mem_ctrl & 0x30)) ? ((m_mmu_mem_ctrl >> 4) & 0x03) : (m_mmu_mem_ctrl & 0x03);
+	uint8_t lut = (m_mmu_mem_ctrl >> 4) & 0x03;
 	m_mlut[lut][offset & 0x07] = data;
 	if (lut == (m_mmu_mem_ctrl & 0x03))
 	{
@@ -511,7 +523,7 @@ uint8_t wildbits_jr2_state::mid_r()
 	return WBJR2_MACHINE_ID;
 }
 
-// Real-Time Clock ($FE10 - $FE1F: bq4802)
+// Real-Time Clock ($FE40 - $FE4F: bq4802)
 static inline uint8_t to_bcd(uint8_t val)
 {
 	return ((val / 10) << 4) | (val % 10);
@@ -527,9 +539,11 @@ uint8_t wildbits_jr2_state::rtc_r(offs_t offset)
 	case 0x02: return to_bcd(systime.local_time.minute);
 	case 0x04: return to_bcd(systime.local_time.hour);
 	case 0x06: return to_bcd(systime.local_time.mday);
-	case 0x08: return to_bcd(systime.local_time.month + 1);
-	case 0x09: return to_bcd(systime.local_time.year % 100);
+	case 0x08: return to_bcd(systime.local_time.weekday + 1);
+	case 0x09: return to_bcd(systime.local_time.month + 1);
+	case 0x0a: return to_bcd(systime.local_time.year % 100);
 	case 0x0e: return m_rtc_ctrl;
+	case 0x0f: return to_bcd(systime.local_time.year / 100);
 	default: return 0;
 	}
 }
@@ -540,7 +554,7 @@ void wildbits_jr2_state::rtc_w(offs_t offset, uint8_t data)
 		m_rtc_ctrl = data;
 }
 
-// Audio CODEC ($FE70 - $FE72: WM8731)
+// Audio CODEC ($FE70 - $FE72: WM8776)
 uint8_t wildbits_jr2_state::codec_r(offs_t offset)
 {
 	if (offset == 2)
@@ -552,6 +566,12 @@ void wildbits_jr2_state::codec_w(offs_t offset, uint8_t data)
 {
 	if (offset == 0) m_codec_lo = data;
 	else if (offset == 1) m_codec_hi = data;
+}
+
+// Hardware Configuration DIP Switches ($FF90)
+uint8_t wildbits_jr2_state::dipsw_r()
+{
+	return m_dipsw->read();
 }
 
 // Interrupt Controller ($FE20 - $FE2F)
@@ -640,6 +660,8 @@ TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer1_tick)
 
 uint8_t wildbits_jr2_state::timer_r(offs_t offset)
 {
+	uint32_t t0_current = (uint32_t)(machine().time().as_ticks(25'175'000) & 0xffffff);
+
 	switch (offset)
 	{
 	case 0x00: {
@@ -647,9 +669,9 @@ uint8_t wildbits_jr2_state::timer_r(offs_t offset)
 		m_t0_stat = 0; // Read clears status
 		return stat;
 	}
-	case 0x01: return m_t0_val & 0xff;
-	case 0x02: return (m_t0_val >> 8) & 0xff;
-	case 0x03: return (m_t0_val >> 16) & 0xff;
+	case 0x01: return t0_current & 0xff;
+	case 0x02: return (t0_current >> 8) & 0xff;
+	case 0x03: return (t0_current >> 16) & 0xff;
 	case 0x04: return m_t0_cmp_ctr;
 	case 0x05: return m_t0_cmp & 0xff;
 	case 0x06: return (m_t0_cmp >> 8) & 0xff;
@@ -876,6 +898,10 @@ void wildbits_jr2_state::poll_uart_socket()
 			if (m_uart_rx_fifo.size() < 4096)
 				m_uart_rx_fifo.push(buf[i]);
 		}
+		if (m_uart_ier & 0x01)
+		{
+			set_irq(1, 0x01); // INT_UART (Group 1, bit 0)
+		}
 	}
 }
 
@@ -935,9 +961,17 @@ void wildbits_jr2_state::uart_w(offs_t offset, uint8_t data)
 		break;
 	case 1: // IER (or DLH if DLAB=1)
 		if (m_uart_lcr & 0x80)
+		{
 			m_uart_dlh = data;
+		}
 		else
+		{
 			m_uart_ier = data;
+			if ((m_uart_ier & 0x01) && !m_uart_rx_fifo.empty())
+			{
+				set_irq(1, 0x01); // INT_UART (Group 1, bit 0)
+			}
+		}
 		break;
 	case 2: // FCR
 		m_uart_fcr = data;
@@ -966,11 +1000,14 @@ void wildbits_jr2_state::uart_w(offs_t offset, uint8_t data)
 // WizFi360 WiFi / SPI Controller ($FF20 - $FF2F)
 void wildbits_jr2_state::push_wizfi_response(const std::string &resp)
 {
+	if (resp.empty())
+		return;
 	for (char c : resp)
 	{
 		if (m_wizfi_rx_fifo.size() < 2048)
 			m_wizfi_rx_fifo.push((uint8_t)c);
 	}
+	set_irq(3, 0x01); // INT_WIZFI_RX (Group 3, bit 0)
 }
 
 void wildbits_jr2_state::reset_wizfi()
@@ -1030,6 +1067,7 @@ void wildbits_jr2_state::poll_wizfi_socket()
 					m_wizfi_rx_fifo.push(rx_buf[i]);
 			}
 		}
+		set_irq(3, 0x01); // INT_WIZFI_RX (Group 3, bit 0)
 	}
 }
 
@@ -1550,6 +1588,7 @@ void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 			{
 				std::string resp = util::string_format("\r\nRecv %d bytes\r\n\r\nSEND OK\r\n", m_wizfi_cipsend_total);
 				push_wizfi_response(resp);
+				set_irq(3, 0x20); // INT_WIZFI_TX (Group 3, bit 5: TX FIFO empty)
 			}
 		}
 		else
@@ -1560,6 +1599,7 @@ void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 				{
 					process_wizfi_cmd(m_wizfi_tx_buf);
 					m_wizfi_tx_buf.clear();
+					set_irq(3, 0x20); // INT_WIZFI_TX (Group 3, bit 5: TX FIFO empty)
 				}
 			}
 			else
@@ -1804,8 +1844,8 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 	// $FE07: Machine ID register
 	map(0xfe07, 0xfe07).r(FUNC(wildbits_jr2_state::mid_r));
 
-	// $FE10-$FE1F: Real-Time Clock (bq4802)
-	map(0xfe10, 0xfe1f).rw(FUNC(wildbits_jr2_state::rtc_r), FUNC(wildbits_jr2_state::rtc_w));
+	// $FE40-$FE4F: Real-Time Clock (bq4802)
+	map(0xfe40, 0xfe4f).rw(FUNC(wildbits_jr2_state::rtc_r), FUNC(wildbits_jr2_state::rtc_w));
 
 	// $FE20-$FE2F: Interrupt Controller
 	map(0xfe20, 0xfe2f).rw(FUNC(wildbits_jr2_state::intc_r), FUNC(wildbits_jr2_state::intc_w));
@@ -1819,7 +1859,7 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 	// $FE60-$FE67: 16550 UART (Serial / DriveWire)
 	map(0xfe60, 0xfe67).rw(FUNC(wildbits_jr2_state::uart_r), FUNC(wildbits_jr2_state::uart_w));
 
-	// $FE70-$FE72: Audio CODEC (WM8731)
+	// $FE70-$FE72: Audio CODEC (WM8776)
 	map(0xfe70, 0xfe72).rw(FUNC(wildbits_jr2_state::codec_r), FUNC(wildbits_jr2_state::codec_w));
 
 	// $FE90-$FE91: SPI SD Card Controller
@@ -1831,6 +1871,9 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 
 	// $FF20-$FF2F: WizFi360 WiFi / SPI Controller
 	map(0xff20, 0xff2f).rw(FUNC(wildbits_jr2_state::wizfi_r), FUNC(wildbits_jr2_state::wizfi_w));
+
+	// $FF90: Hardware Configuration DIP Switches
+	map(0xff90, 0xff90).r(FUNC(wildbits_jr2_state::dipsw_r));
 
 	// $FFA0-$FFA1: MMU Control registers
 	map(0xffa0, 0xffa0).rw(FUNC(wildbits_jr2_state::mmu_mem_ctrl_r), FUNC(wildbits_jr2_state::mmu_mem_ctrl_w));
@@ -1995,6 +2038,10 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 void wildbits_jr2_state::machine_start()
 {
 	m_ram = std::make_unique<uint8_t[]>(0x80000);     // 512KB SRAM
+	m_cart = std::make_unique<uint8_t[]>(0x40000);       // 256KB Cartridge port decode ($80 - $9F)
+	std::fill_n(m_cart.get(), 0x40000, 0xff);
+	m_unmapped = std::make_unique<uint8_t[]>(0x2000);   // 8KB dummy unmapped page
+	std::fill_n(m_unmapped.get(), 0x2000, 0xff);
 	m_vram_c0 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C0
 	m_vram_c1 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C1 (Fonts & LUTs)
 	m_vram_c2 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C2 (Text Matrix)
@@ -2005,6 +2052,7 @@ void wildbits_jr2_state::machine_start()
 	m_timer1 = timer_alloc(FUNC(wildbits_jr2_state::timer1_tick), this);
 
 	save_pointer(NAME(m_ram), 0x80000);
+	save_pointer(NAME(m_cart), 0x40000);
 	save_pointer(NAME(m_vram_c0), 0x2000);
 	save_pointer(NAME(m_vram_c1), 0x2000);
 	save_pointer(NAME(m_vram_c2), 0x2000);
@@ -2441,6 +2489,21 @@ static INPUT_PORTS_START( wbjr2 )
 	PORT_BIT( 0x2000, IP_ACTIVE_HIGH, IPT_KEYBOARD ) PORT_NAME("Delete") PORT_CODE(KEYCODE_DEL) PORT_CHAR(UCHAR_MAMEKEY(DEL))
 	PORT_BIT( 0x4000, IP_ACTIVE_HIGH, IPT_KEYBOARD ) PORT_NAME("Home") PORT_CODE(KEYCODE_HOME) PORT_CHAR(UCHAR_MAMEKEY(HOME))
 	PORT_BIT( 0x8000, IP_ACTIVE_HIGH, IPT_KEYBOARD ) PORT_NAME("End") PORT_CODE(KEYCODE_END) PORT_CHAR(UCHAR_MAMEKEY(END))
+
+	PORT_START("DIPSW")
+	PORT_DIPNAME( 0x80, 0x00, "Gamma Correction" )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x80, DEF_STR( On ) )
+	PORT_DIPNAME( 0x40, 0x00, "Turbo Stretch Mode (~1.4x)" )
+	PORT_DIPSETTING(    0x00, DEF_STR( Off ) )
+	PORT_DIPSETTING(    0x40, DEF_STR( On ) )
+	PORT_DIPNAME( 0x30, 0x00, "User DIP Switches" )
+	PORT_DIPSETTING(    0x00, "00" )
+	PORT_DIPSETTING(    0x10, "01" )
+	PORT_DIPSETTING(    0x20, "10" )
+	PORT_DIPSETTING(    0x30, "11" )
+	PORT_DIPNAME( 0x0f, 0x00, "Boot Mode" )
+	PORT_DIPSETTING(    0x00, "Normal Boot" )
 INPUT_PORTS_END
 
 ROM_START(wbjr2)
