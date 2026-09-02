@@ -339,10 +339,8 @@ All multi-byte pointer and coordinate fields are stored high-byte first (standar
 | :--- | :--- | :--- |
 | `00` | 32 × 32 | `$01` |
 | `01` | 24 × 24 | `$21` |
-| `00` | 32 x 32 | `$01` |
-| `01` | 24 x 24 | `$21` |
-| `10` | 16 x 16 | `$41` |
-| `11` | 8 x 8 | `$61` |
+| `10` | 16 × 16 | `$41` |
+| `11` | 8 × 8 | `$61` |
 
 * **Pixel Data Addressing:** Pointer points to physical 24-bit SRAM address (`Block * $2000 + Offset`), stored row-major at 1 byte per pixel.
 * **Graphics CLUTs (Page `$C1`, Offsets `$1000–$1FFF`):** Four 256-color palettes sharing Page `$C1` with fonts. Each entry is 4 bytes ordered `[Blue, Green, Red, Alpha]`:
