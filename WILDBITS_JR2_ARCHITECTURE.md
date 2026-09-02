@@ -200,7 +200,7 @@ When changing MMU mappings during boot or reboot, code cannot execute from a slo
    * `bootos9` (and the FEU's `os9boot`) copies a small relocatable stub to `$0600` in Block 0 and jumps to it.
    * Running safely from `$0600`, the stub resets MMU slots 0–7 to identity (Blocks `$00–$07`) and jumps to the kernel entry point (`Bt.Start = $EE00`).
 2. **Kernel Staging Blocks `(8-n)..7`:**
-   * An $n$-block bootfile (`OS9Boot`, currently $n=4$, Blocks `$04–$07`) is staged in the upper RAM blocks below Block 8.
+   * An n-block bootfile (`OS9Boot`, currently n = 4, Blocks `$04–$07`) is staged in the upper RAM blocks below Block 8.
    * The kernel (`krn`) is anchored as the final module exactly 4,096 bytes before the end of the bootfile, landing cleanly at `$EE00` in Slot 7.
 3. **Ghost-Test Memory Sizing:**
    * At startup, `krn` does not use a hardcoded table; it writes a marker across successively doubled block numbers (8, 16, 32, 64...) until the write aliases back to Block 0, dynamically discovering the 64 blocks (512 KB) recorded in `D.MemSz`.
@@ -290,7 +290,7 @@ TinyVicky II features a line-buffered **128-sprite hardware engine** designed fo
 * **Line-Buffered Architecture:** The engine is line-buffered (not framebuffered). The display operates at 640×480 with pixels doubled from a 320×240 coordinate space, so the engine fetches sprite data once per scanline pair during horizontal blanking.
 * **Scan Priority:** On odd scanlines, the master video scheduler invokes `Sprite_State_Machine.v`. The engine walks all 128 attribute records **from sprite 127 down to sprite 0**. Because sprite 0 is processed last into the line buffer, **sprite 0 has highest display priority and wins all overlaps**.
 * **Line Hit Detection:** For each enabled sprite, a line hit occurs when:
-  $$\text{Sprite } Y \le \left(\frac{\text{scanline}}{2} + 32\right) < \text{Sprite } Y + \text{height}$$
+  `Sprite_Y <= (scanline / 2 + 32) < Sprite_Y + height`
   Disabled sprites skip in ~3 clock cycles; scanning 128 disabled sprites takes under 4 µs.
 * **Compositing & Transparency:** During even scanlines, the line buffer merges with text, bitmap, and tile layers. Pixel index 0 is transparent; non-zero indices look up colors in the sprite's designated graphics CLUT.
 
@@ -310,12 +310,12 @@ Master Control Register 0 (`$FFC0`) is fixed I/O, accessible in all maps:
 #### 3. Sprite Attribute Block (VICKY Page `$C0`, Offsets `$1300–$16FF`):
 The 128 attribute records reside in dual-port BRAM inside sectored I/O Page `$C0`. Mapping Page `$C0` into `Slot 2` (`$FFAA = $C0`) makes the attribute block accessible at CPU addresses `$5300–$56FF`:
 
-| Sprites | Page Offset | CPU Logical (Slot 2) | Record $n$ Address |
+| Sprites | Page Offset | CPU Logical (Slot 2) | Record n Address |
 | :--- | :--- | :--- | :--- |
-| **0 – 31** | `$1300 - $13FF` | `$5300 - $53FF` | `$5300 + 8 \times n$` |
-| **32 – 63** | `$1400 - $14FF` | `$5400 - $54FF` | `$5400 + 8 \times (n - 32)$` |
-| **64 – 95** | `$1500 - $15FF` | `$5500 - $55FF` | `$5500 + 8 \times (n - 64)$` |
-| **96 – 127** | `$1600 - $16FF` | `$5600 - $56FF` | `$5600 + 8 \times (n - 96)$` |
+| **0 – 31** | `$1300 - $13FF` | `$5300 - $53FF` | `$5300 + 8 * n` |
+| **32 – 63** | `$1400 - $14FF` | `$5400 - $54FF` | `$5400 + 8 * (n - 32)` |
+| **64 – 95** | `$1500 - $15FF` | `$5500 - $55FF` | `$5500 + 8 * (n - 64)` |
+| **96 – 127** | `$1600 - $16FF` | `$5600 - $56FF` | `$5600 + 8 * (n - 96)` |
 
 #### 4. The 8-Byte Attribute Record Format (Big-Endian):
 All multi-byte pointer and coordinate fields are stored high-byte first (standard 6809 big-endian order):
@@ -339,22 +339,24 @@ All multi-byte pointer and coordinate fields are stored high-byte first (standar
 | :--- | :--- | :--- |
 | `00` | 32 × 32 | `$01` |
 | `01` | 24 × 24 | `$21` |
-| `10` | 16 × 16 | `$41` |
-| `11` | 8 × 8 | `$61` |
+| `00` | 32 x 32 | `$01` |
+| `01` | 24 x 24 | `$21` |
+| `10` | 16 x 16 | `$41` |
+| `11` | 8 x 8 | `$61` |
 
 * **Pixel Data Addressing:** Pointer points to physical 24-bit SRAM address (`Block * $2000 + Offset`), stored row-major at 1 byte per pixel.
 * **Graphics CLUTs (Page `$C1`, Offsets `$1000–$1FFF`):** Four 256-color palettes sharing Page `$C1` with fonts. Each entry is 4 bytes ordered `[Blue, Green, Red, Alpha]`:
-  * `LUT0`: `$1000–$13FF` (Entry $i$ at `$1000 + 4 \times i$)
-  * `LUT1`: `$1400–$17FF` (Entry $i$ at `$1400 + 4 \times i$)
-  * `LUT2`: `$1800–$1BFF` (Entry $i$ at `$1800 + 4 \times i$)
-  * `LUT3`: `$1C00–$1FFF` (Entry $i$ at `$1C00 + 4 \times i$)
+  * `LUT0`: `$1000–$13FF` (Entry i at `$1000 + 4 * i`)
+  * `LUT1`: `$1400–$17FF` (Entry i at `$1400 + 4 * i`)
+  * `LUT2`: `$1800–$1BFF` (Entry i at `$1800 + 4 * i`)
+  * `LUT3`: `$1C00–$1FFF` (Entry i at `$1C00 + 4 * i`)
 
 #### 5. Coordinate System & Off-Screen Margins:
 Sprite coordinates operate in a **32-pixel offset border space** allowing sprites to smoothly scroll entirely off any screen edge:
-* **Coordinate `(0, 0)`:** Top-left of off-screen margin.
-* **Visible Top-Left:** `(32, 32)`.
-* **Visible Bottom-Right:** `(351, 271)` (for 320 × 240 display area).
-* **Screen Center (for 8 × 8 sprite):** $X = 32 + (320 - 8) / 2 = 188$ (`$00BC`), $Y = 32 + (240 - 8) / 2 = 148$ (`$0094`).
+* **Coordinate (0, 0):** Top-left of off-screen margin.
+* **Visible Top-Left:** (32, 32).
+* **Visible Bottom-Right:** (351, 271) (for 320 x 240 display area).
+* **Screen Center (for 8 x 8 sprite):** X = 32 + (320 - 8) / 2 = 188 (`$00BC`), Y = 32 + (240 - 8) / 2 = 148 (`$0094`).
 
 ---
 
@@ -396,7 +398,7 @@ Each tilemap layer is configured via a 12-byte register block:
 * **Layer 1 (`TL1`):** Page offset `$110C–$1117` (Logical `$510C–$5117`)
 * **Layer 2 (`TL2`):** Page offset `$1118–$1123` (Logical `$5118–$5123`)
 
-For each layer $k \in \{0, 1, 2\}$:
+For each layer k (0, 1, or 2):
 * `+0`: `TLk_CONTROL_REG`
   * Bit 0: `TILE_Enable` (1 = layer enabled)
   * Bits 3..1: `LUT Select` (Graphics CLUT 0..3)
@@ -759,9 +761,13 @@ The Wildbits Jr2 features a physical 16550-compatible UART mapped at `$FE60-$FE6
 #### 1. Hardware Baud Generator & BAUDCE Clocking:
 * **The 25.175 MHz Baud Deviation Problem:** In early cores, the 16550 baud generator ran directly from the 25.175 MHz video dot clock. The closest integer divisor to 230,400 baud was 6, which produced **224,777 baud (-2.4% error)**. While marginally within 8N1 tolerance for short bursts, sustained transfers under `/x1` accumulated bit drift, causing framing errors and random `#244` (`E$Read`) errors that cascaded into driver desynchronization.
 * **Exact 22.1184 MHz Baud Reference (`BAUDCE`, Core `v8_rc3`+):** Modern FPGA cores incorporate a fractional clock-enable (`BAUDCE`) that synthesizes an exact **22.1184 MHz** clock for the UART's baud rate generator:
-  $$\text{Baud} = \frac{22,118,400}{16 \times \text{Divisor}}$$
+  ```
+  Baud = 22,118,400 / (16 * Divisor)
+  ```
   With divisor **5** (`DLL = 5, DLH = 0`):
-  $$\text{Baud} = \frac{22,118,400}{80} = \mathbf{230,400 \text{ baud (0.0\% error!)}}$$
+  ```
+  Baud = 22,118,400 / 80 = 230,400 baud (0.0% error)
+  ```
 * **Core & Driver Pairing:** The hardened NitrOS-9 serial driver (`dwinit_wildbits_serial.asm`) writes divisor **5** (matching `v8_rc3`+ cores).
 
 #### 2. DriveWire Protocol & Driver Hardening (`wildbits-drivewire-hardening.md`):
@@ -868,16 +874,16 @@ The Wildbits Jr2 incorporates an integer math accelerator inside the Artix-7 FPG
 ```
 
 #### Register Interface & Big-Endian Alignment:
-* **`$FEE0-$FEE3` $\rightarrow$ `$FEF0-$FEF3` (Unsigned 16×16 $\rightarrow$ 32-bit Multiplication):**
+* **`$FEE0-$FEE3` → `$FEF0-$FEF3` (Unsigned 16×16 → 32-bit Multiplication):**
   * `MULU_A` (`$FEE0` High, `$FEE1` Low) and `MULU_B` (`$FEE2` High, `$FEE3` Low).
   * Product available immediately at `$FEF0-$FEF3` (`HH`, `HL`, `LH`, `LL`).
-  * 6809 assembly: `STD $FEE0` / `STD $FEE2` $\rightarrow$ `LDD $FEF0` / `LDX $FEF2`.
-* **`$FEE4-$FEE7` $\rightarrow$ `$FEF4-$FEF7` (Unsigned 16/16 $\rightarrow$ 16-bit Quotient & Remainder):**
+  * 6809 assembly: `STD $FEE0` / `STD $FEE2` → `LDD $FEF0` / `LDX $FEF2`.
+* **`$FEE4-$FEE7` → `$FEF4-$FEF7` (Unsigned 16/16 → 16-bit Quotient & Remainder):**
   * `DIVU_DEN` (`$FEE4-$FEE5`) and `DIVU_NUM` (`$FEE6-$FEE7`).
   * `QUOU_RES` at `$FEF4-$FEF5` and `REMU_RES` at `$FEF6-$FEF7`.
   * **Divide-by-Zero Guard:** When denominator = 0, hardware and emulation return saturated quotient (`$FFFF`) and remainder = numerator with zero host exceptions.
-* **`$FEE8-$FEEF` $\rightarrow$ `$FEF8-$FEFB` (Unsigned 32-bit Addition):**
-  * `ADD_A` (`$FEE8-$FEEB`) + `ADD_B` (`$FEEC-$FEEF`) $\rightarrow$ `ADD_RES` (`$FEF8-$FEFB`) with carry propagation.
+* **`$FEE8-$FEEF` → `$FEF8-$FEFB` (Unsigned 32-bit Addition):**
+  * `ADD_A` (`$FEE8-$FEEB`) + `ADD_B` (`$FEEC-$FEEF`) → `ADD_RES` (`$FEF8-$FEFB`) with carry propagation.
 
 ---
 
