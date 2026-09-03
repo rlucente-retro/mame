@@ -2150,12 +2150,12 @@ void wildbits_jr2_state::machine_reset()
 	m_vky_line_cmp = 0xffff;
 	m_scanline_timer->adjust(attotime::never);
 
-	// Reset Interrupt Controller (all IRQs masked by default)
+	// Reset Interrupt Controller (EDGE=0xFF edge mode, POL=0x00 falling, all IRQs masked)
 	for (int g = 0; g < 4; g++)
 	{
 		m_int_pending[g] = 0x00;
 		m_int_pol[g] = 0x00;
-		m_int_edge[g] = 0x00;
+		m_int_edge[g] = 0xff; // Default edge-triggered mode per IRQ_Controller_Jr.v
 		m_int_mask[g] = 0xff; // All masked
 	}
 	check_irqs();

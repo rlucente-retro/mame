@@ -186,8 +186,21 @@ $FFA8 - $FFAF: MMU Slot Mapping Registers (accesses EDIT_LUT selected by $FFA0[5
 | `1100 0xxx` | **Sectored I/O Pages** | `$C0–$C4` | TinyVicky registers, CLUTs, VRAM, and sound |
 
 > [!IMPORTANT]
-> **The Slot-2 Communal Work Window (`$4000–$5FFF`):**
-> In NitrOS-9 Level 2, `Slot 2` is reserved as a temporary mapping window for drivers (`rbmem` maps flash blocks, `mousedrv` maps sprite page `$C0`, `vtio` maps video pages). Drivers borrowing Slot 2 must mask interrupts (`orcc #IntMasks`), save the existing mapping, perform the transfer, and restore the original slot mapping before unmasking.
+> **The Slot-2 Communal Work Window (`$4000–$5FFF`) & Driver Safety Architecture:**
+> In NitrOS-9 Level 2 on Wildbits, `Slot 2` (`$4000–$5FFF`) is designated as the shared temporary mapping window for drivers:
+> * `vtio`: Maps text matrix (`$C2`), attributes (`$C3`), gamma/bitmap (`$C0`), font (`$C1`), sound (`$C4`).
+> * `mousedrv`: Maps sprite attribute page (`$C0`) to update pointer records.
+> * `rbmem`: Maps physical Flash ROM (`/f0`, `/f1`) and RAM-disk sectors.
+> 
+> **The Historical "One Character, Then Freeze" Fork Crash (`wildbits-mmu-slot-safety.md`):**
+> * *Root Cause:* The Level 2 kernel's `F$SRqMem` allocates system pages from the top of memory downward (`$70` down). After ~17 pages of allocations (e.g. running 4 network listener daemons), system descriptors and stacks crossed into `$40–$5F` (Slot 2). When a driver borrowed Slot 2 by mapping a video or flash block, any stack operation (`pshs`, `puls`, `bsr`, or interrupt) accessed the mapped video/flash memory instead of the actual stack, corrupting the return frame and wandering on the very next instruction.
+> * *The Two-Layer Hardened Fix (`wb/proper_slot_preservation`):*
+>   1. **`vtio.asm` Driver State Isolation:** No window operation saves the previous slot value on the stack. The saved mapping is parked in a dedicated statics variable (`V.MapSav` in `defs/wildbits_vtio.d`), and temporaries use interrupt-masked direct-page scratch (`D.IRQTmp`).
+>   2. **`krn.asm` System Slot Reservation:** At cold start, immediately after marking its global memory used, `krn` explicitly marks pages `$40–$5F` (Slot 2) as allocated in `D.SysMem` (`9E 4E 30 88 40 C6 20 6C 80 5A 26 FB`). This completely reserves Slot 2 from the system allocation pool, guaranteeing that process descriptors and system stacks can never reside in Slot 2.
+> * *Rules for Wildbits Driver Authors:*
+>   - Always borrow Slot 2; never map scratch windows into Slots 0, 1, or 3–7.
+>   - Never save slot registers onto the stack across mapping changes; use driver statics or masked DP scratch.
+>   - Keep mapped windows strictly short and interrupt-masked (`orcc #IntMasks`).
 
 ---
 
@@ -449,14 +462,14 @@ Group 0 ($FE20 / $FE2C) -- Core System:
   Bit 7: INT_CARTRIDGE   - Cartridge Slot IRQ Line (CRT_IRQn)
 
 Group 1 ($FE21 / $FE2D) -- Peripherals:
-  Bit 0: INT_UART        - 16550 UART Event (COM1 TX/RX Ready)
-  Bit 1: INT_VKY_INT2    - TinyVicky Interrupt 2
-  Bit 2: INT_VKY_INT3    - TinyVicky Interrupt 3
-  Bit 3: INT_VKY_INT4    - TinyVicky Interrupt 4
-  Bit 4: INT_RTC         - bq4802 RTC Periodic / Alarm Event
-  Bit 5: INT_VIA0        - WDC 65C22 VIA 0 Event (Joysticks / Timers)
-  Bit 6: INT_VIA1        - 65C22 VIA 1 Event (F256K mechanical keyboard; unpopulated on Jr2)
-  Bit 7: INT_SDC_INS     - SD Card Inserted (SDC_IRQ[2])
+  Bit 0: INT_UART        - 16550 UART Event (!COM1_int_PulSe[3])
+  Bit 1: INT_VKY_INT2    - TinyVicky Interrupt 2 (VICKY_INT_Sync[2])
+  Bit 2: INT_VKY_INT3    - TinyVicky Interrupt 3 (VICKY_INT_Sync[3])
+  Bit 3: INT_VKY_INT4    - TinyVicky Interrupt 4 (VICKY_INT_Sync[4])
+  Bit 4: Constant 0      - Unused
+  Bit 5: INT_RTC         - bq4802 RTC Periodic / Alarm Event (RTC_IRQ[2])
+  Bit 6: INT_VIA0        - WDC 65C22 VIA 0 Event (Joysticks / Timers, VIA0_INT_i)
+  Bit 7: INT_SDC_INS     - SD Card Inserted (SDC_IRQ[2]) [Note: Bit 7 in RTL; older defs/wildbits.d had an errant Bit 6 equate]
 
 Group 2 ($FE22 / $FE2E) -- IEC Bus & External Modules:
   Bit 0: IEC_DATA_i      - Commodore IEC Serial Bus DATA Input Transition
@@ -470,10 +483,10 @@ Group 2 ($FE22 / $FE2E) -- IEC Bus & External Modules:
 
 Group 3 ($FE23 / $FE2F) -- FIFO Events:
   Bit 0: INT_WIZFI_RX    - WizFi360 RX FIFO Non-Empty (NEW_Rx_FIFO_WIFI_Sync)
-  Bit 1: INT_MIDI_RX     - SAM2695 MIDI RX FIFO Non-Empty
-  Bit 2: INT_OPT_KBD     - Optical Keyboard FIFO Non-Empty (K2 optical keyboard only; unpopulated on Jr2)
+  Bit 1: INT_MIDI_RX     - SAM2695 MIDI RX FIFO Non-Empty (NEW_Rx_FIFO_MIDI_Sync)
+  Bit 2: INT_OPT_KBD     - Optical Keyboard Typematic (K2 optical keyboard only; unpopulated on Jr2)
   Bit 3: INT_WIZNET_FIFO - WizNet Ethernet FIFO Event (W6100 Ethernet on K2; unpopulated on Jr2)
-  Bit 4: INT_MIDI_VS_RX  - MIDI Synth VS RX FIFO Non-Empty
+  Bit 4: INT_MIDI_VS_RX  - MIDI Synth VS RX FIFO Non-Empty (NEW_Rx_FIFO_MIDI_VS_Sync)
   Bit 5: INT_WIZFI_TX    - WizFi360 TX FIFO Drained to Empty (NEW_Tx_FIFO_WIFI_Sync)
   Bit 6..7: Constant 0   - Unused
 ```
@@ -484,10 +497,13 @@ Group 3 ($FE23 / $FE2F) -- FIFO Events:
 3. **Write-1-to-Clear (W1C):** Writing a `1` bit to a `PENDING` register clears that pending event; writing `0` leaves it unchanged. Reading is side-effect-free.
 4. **Power-On Reset Defaults:**
    * `POLARITY` (`$FE24-$FE27`) = `$00` (falling edge trigger)
-   * `EDGE` (`$FE28-$FE2B`) = `$FF` (edge-sensitive mode)
+   * `EDGE` (`$FE28-$FE2B`) = `$FF` (edge-sensitive mode per `IRQ_Controller_Jr.v`)
    * `MASK` (`$FE2C-$FE2F`) = `$FF` (all 32 lines masked)
    * `PENDING` (`$FE20-$FE23`) = `$00` (all cleared)
-5. **Soft Reset Retention:** Interrupt controller registers reset **only on cold FPGA reset**. A software reboot (`wbreset`) preserves existing mask and pending states, which is why the NitrOS-9 Level 2 kernel initialization actively masks and clears all four groups at startup.
+5. **Soft Reset Retention & Kernel Cold-Start Hygiene (`wildbits-interrupt-hygiene.md`):**
+   * The FPGA interrupt controller registers reset **only on cold physical FPGA reset**. A software reboot (`bootos9`, debugger restart, `wbreset`) preserves existing mask and pending bits from previous driver sessions.
+   * To prevent unserviced interrupt storms (e.g. WiFi bits unmasked by `wizi` triggering before a driver installs), NitrOS-9 `krn.asm` cold start actively writes `$FF` to all four `MASK` registers and `$FF` to all four `PENDING` registers before any driver initializes.
+   * In `clock.asm`, `Init` performs a read-modify-write on `MASK_0` touching only its own `SOF` bit, preserving other drivers' active interrupt masks (e.g. `mousedrv`).
 6. **IEC NMI Routing:** When hardware strap `IEC_NMI_IRQn_i` is pulled low, Group 2 bits 0–3 also assert the 6809 Non-Maskable Interrupt (`NMI`).
 
 ---
@@ -557,6 +573,22 @@ truncate -s 4M $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 > [!IMPORTANT]
 > **SD Card Image Sizing:** MAME's SPI SD card controller validates disk images against standard SD/SDHC capacity structures (which require power-of-two or 512KB-aligned sector counts). ToolShed (`os9 copy`) creates sparse/unpadded images with non-standard byte counts as files are added. Always use `truncate -s <size>` to pad the `.dsk` image to the next standard SD card size larger than the actual file (e.g. `4M` for default builds, or `8M`, `16M`, `32M`, etc., if additional packages/files are added).
 
+### 6.3 Flash Memory & External Bus Hardening (`wildbits-flash-hardening.md`)
+
+The onboard SST39VF040 512 KB Flash ROM (Blocks `$40–$7F`) and external cartridge slots (`/c0` at Block `$80`, `/c1` at Block `$90`) interact through a shared physical external bus:
+
+1. **DQ6 Toggle Polling (Driver Hardening):**
+   * The SST39 sector erase cycle takes 18 ms typical (25 ms max). Early driver spin loops calibrated to ~19 ms failed intermittently under varying CPU speeds or dirty sectors, causing spurious `#243` (`E$Write`) errors.
+   * In the hardened `rbmem.asm` driver, cycle counts are replaced with **DQ6 toggle bit polling**: reading the flash location repeatedly until bit 6 ceases toggling guarantees internal chip completion across all clock speeds, bounded by a generous 200 ms timeout. Byte programming uses the same deterministic verify loop with a 256-poll bound (`clrb`).
+2. **Shared External Write Strobe Policy (`v8_rc6`+ FPGA Cores):**
+   * On the Wildbits Jr2, the external bus shares **one common write strobe** across three different hardware clients:
+     1. Onboard SST39VF040 Flash ROM (`$40–$7F`)
+     2. Expansion Cartridges (`/c0` at `$80`, `/c1` at `$90`, mapped via the EXRAM decode)
+     3. bq4802 Real-Time Clock (RTC at `$FE40–$FE4F`)
+   * *The Turbo Frame-Timing Defect:* In ~1.4x Turbo mode, shortened 24-tick CPU instruction frames violated the SST39 write enable (`WE`) pulse geometry, causing command writes to bounce and resulting in silent write drops (probe reading raw `$C000` array bytes instead of ID `$BFD7`).
+   * *The Hardware Solution:* The Jr2 MMU (`v8_rc6`+) generates a dedicated **frame-timed write pulse** (active low from tick 19 to 27 of a 32-tick frame, providing a 45 ns pulse with 65 ns setup) for both **Flash and Cartridge/EXRAM** write cycles.
+   * *RTC Raw Strobe Pass-Through:* The bq4802 RTC requires extended bus cycles with RDY-inserted wait states. RTC writes **bypass** the fixed 45 ns pulse and pass the raw CPU strobe through directly, ensuring clock setting remains reliable in both stock and turbo modes.
+
 ---
 
 ## 7. WizFi360 Wi-Fi Hardware Subsystem & Emulation Architecture
@@ -597,8 +629,9 @@ The Wildbits Jr2 integrates a **WIZnet WizFi360-PA** Wi-Fi module connected to t
 The WizFi360 interface is utilized across multiple software layers in NitrOS-9 Level 2:
 
 1. **Driver Initialization (`iniz wz` / `startup`):**
-   * Configures Timer 0 at 11.52 kHz (`TRATE = 2185` cycles on 25.175 MHz dot clock) and unmasks `INT_TIMER_0`.
-   * Pulses hardware reset via `$FF20`, synchronizes with `AT\r\n` → `OK\r\n`, disables echo (`ATE0`), sets station mode (`AT+CWMODE=1`), and enables multi-connection mode (`AT+CIPMUX=1`).
+   * Eliminates Timer 0 reliance entirely (leaving Timer 0 free for other applications).
+   * Pulses hardware reset via `$FF20` bit 1, synchronizes with `AT\r\n` → `OK\r\n`, disables echo (`ATE0`), sets station mode (`AT+CWMODE=1`), and enables multi-connection mode (`AT+CIPMUX=1` / `AT+CIPSERVERMAXCONN=4`).
+   * Installs 60 Hz clock-tick batching (`TickSvc`) or reader-driven flushes (`DrainAll`), allocating shared parser state and per-channel queues in `D.DbgMem` (DP `$0A–$0B`, resolving the collision with K2 optical keyboard statics).
 2. **Wi-Fi Router Configuration (`SCRIPTS/wizcon`):**
    * Configures persistent station parameters (`AT+CWMODE_DEF=1`, `AT+CWDHCP_DEF=1,1`, `AT+CWJAP_DEF="ssid","pass"`).
    * Verifies IP assignment via `AT+CIPSTA_CUR?`.
@@ -1073,6 +1106,9 @@ The following core peripheral and memory mapping revisions have been implemented
 
 6. **Mapped Hardware Configuration DIP Switches at `$FF90`**:
    * Added read handler for `$FF90` (`K2_DIP_SW.Base`) bound to MAME `DIPSW` input port with settings for Gamma enable, Turbo stretch mode (~1.4x), user switches, and boot mode.
+
+7. **Aligned INTC Edge Register Reset Default (`EDGE = $FF`)**:
+   * Set `m_int_edge[0..3] = 0xFF` at reset in `machine_reset()` matching `IRQ_Controller_Jr.v` hardware edge-sensitive defaults.
 
 ---
 
