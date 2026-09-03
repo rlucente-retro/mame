@@ -2271,7 +2271,29 @@ void wildbits_jr2_state::device_stop()
 		line[80] = 0;
 		printf("%02d: |%s|\n", r, line);
 	}
-	printf("=================================\n\n");
+	printf("=================================\n");
+	uint16_t pc = m_maincpu->pc();
+	printf("CPU PC: $%04X, INTC PEND: [%02X, %02X, %02X, %02X], MASK: [%02X, %02X, %02X, %02X], MMU_MEM_CTRL: $%02X\n",
+		pc,
+		m_int_pending[0], m_int_pending[1], m_int_pending[2], m_int_pending[3],
+		m_int_mask[0], m_int_mask[1], m_int_mask[2], m_int_mask[3],
+		m_mmu_mem_ctrl);
+
+	uint8_t active_lut = m_mmu_mem_ctrl & 0x03;
+	printf("Active LUT %d Blocks: [", active_lut);
+	for (int s = 0; s < 8; s++)
+		printf("%02X%s", m_mlut[active_lut][s], (s < 7) ? ", " : "]\n");
+
+	uint16_t proc = (m_maincpu->space(AS_PROGRAM).read_byte(0x4b) << 8) | m_maincpu->space(AS_PROGRAM).read_byte(0x4c);
+	uint16_t aprocq = (m_maincpu->space(AS_PROGRAM).read_byte(0x4d) << 8) | m_maincpu->space(AS_PROGRAM).read_byte(0x4e);
+	uint16_t wprocq = (m_maincpu->space(AS_PROGRAM).read_byte(0x4f) << 8) | m_maincpu->space(AS_PROGRAM).read_byte(0x50);
+	uint16_t sprocq = (m_maincpu->space(AS_PROGRAM).read_byte(0x51) << 8) | m_maincpu->space(AS_PROGRAM).read_byte(0x52);
+	printf("D.Proc: $%04X, D.AProcQ: $%04X, D.WProcQ: $%04X, D.SProcQ: $%04X\n", proc, aprocq, wprocq, sprocq);
+
+	printf("Code at PC: ");
+	for (int i = 0; i < 16; i++)
+		printf("%02X ", m_maincpu->space(AS_PROGRAM).read_byte(pc + i));
+	printf("\n\n");
 }
 
 void wildbits_jr2_state::wbjr2(machine_config &config)
