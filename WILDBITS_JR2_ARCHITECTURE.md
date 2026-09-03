@@ -466,10 +466,10 @@ Group 1 ($FE21 / $FE2D) -- Peripherals:
   Bit 1: INT_VKY_INT2    - TinyVicky Interrupt 2 (VICKY_INT_Sync[2])
   Bit 2: INT_VKY_INT3    - TinyVicky Interrupt 3 (VICKY_INT_Sync[3])
   Bit 3: INT_VKY_INT4    - TinyVicky Interrupt 4 (VICKY_INT_Sync[4])
-  Bit 4: Constant 0      - Unused
-  Bit 5: INT_RTC         - bq4802 RTC Periodic / Alarm Event (RTC_IRQ[2])
-  Bit 6: INT_VIA0        - WDC 65C22 VIA 0 Event (Joysticks / Timers, VIA0_INT_i)
-  Bit 7: INT_SDC_INS     - SD Card Inserted (SDC_IRQ[2]) [Note: Bit 7 in RTL; older defs/wildbits.d had an errant Bit 6 equate]
+  Bit 4: INT_RTC         - bq4802 RTC Periodic / Alarm Event (RTC_IRQ[2])
+  Bit 5: INT_VIA0        - WDC 65C22 VIA 0 Event (Joysticks / Timers, VIA0_INT_i)
+  Bit 6: INT_VIA1        - 65C22 VIA 1 Event (VIA1_INT_i - F256K mechanical keyboard; unpopulated on Jr2)
+  Bit 7: INT_SDC_INS     - SD Card Inserted (SDC_IRQ[2]) [Note: Bit 7 in RTL; older defs/wildbits.d had an errant Bit 6 equate colliding with VIA1]
 
 Group 2 ($FE22 / $FE2E) -- IEC Bus & External Modules:
   Bit 0: IEC_DATA_i      - Commodore IEC Serial Bus DATA Input Transition
