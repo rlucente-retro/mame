@@ -39,11 +39,30 @@
 >
 > **Launch Emulator:**
 > ```bash
-> # Standalone FEU (Flash disk) or DriveWire Boot
+> # Standalone FEU (Flash disk) or DriveWire Boot (defaults to -bios turbo)
 > ./mame wbjr2 -window -skip_gameinfo
 >
 > # NitrOS-9 Level 2 (SD card)
 > ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+>
+> # Select Hardware Clock Mode via -bios flag:
+> # Turbo Stretch Mode (~8.8 MHz RAM / 6.3 MHz I/O, ~1.4x):
+> ./mame wbjr2 -window -skip_gameinfo -bios turbo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+>
+> # Stock Clock Mode (6.29 MHz uniform):
+> ./mame wbjr2 -window -skip_gameinfo -bios stock -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+> ```
+>
+> **Run `wildspeed` Benchmark (Autoboot):**
+> ```bash
+> # Turbo Stretch Mode (GUI Window):
+> ./mame wbjr2 -window -skip_gameinfo -bios turbo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk -autoboot_delay 3 -autoboot_command "wildspeed\n"
+>
+> # Stock Clock Mode (GUI Window):
+> ./mame wbjr2 -window -skip_gameinfo -bios stock -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk -autoboot_delay 3 -autoboot_command "wildspeed\n"
+>
+> # Headless Console Mode (runs 30s, prints text matrix snapshot to terminal):
+> ./mame wbjr2 -video none -bios turbo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk -autoboot_delay 3 -autoboot_command "wildspeed\n" -seconds_to_run 30
 > ```
 >
 > **Booting from DriveWire in MAME:** When running `./mame wbjr2` with pyDriveWire listening on port 65504, the emulated 16550 UART automatically bridges to pyDriveWire. In the FEU menu, press <kbd>o</kbd> (*Boot OS-9*), then <kbd>x</kbd> (*Boot OS-9 from DriveWire*).
