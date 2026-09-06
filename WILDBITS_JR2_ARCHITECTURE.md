@@ -1242,9 +1242,137 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
 
 ---
 
-## 8. Current MAME Implementation Status
+## 8. Primary References & Verification Sources
 
-### 8.1 Implementation Status Matrix
+### 8.1 Authoritative Ground Truth Hierarchy & Branch Overlay Model
+
+In developing and verifying the Wildbits Jr2 architecture, the primary source of truth is the **Nitrobotics Resource Portal** (`https://nitrobotics.github.io/Wildbits/`) and the shipping hardware parity kits (`parity_wildbits_jr2_v8_rc11`).
+
+Under the Nitrobotics development workflow, disk images are built from `nitros9/main` with active feature and hardware bugfix branches overlaid onto the tree at build time:
+
+* **Merged Branches in Shipping Main:**
+  * `wb/fixes_bundle`: MMU Slot 2 safety fix (permanent reservation in `krn.asm`), interrupt-controller cold scrub.
+  * `wb/wizcon4`: Four independent packet-mode WiFi channels (`/wz0`–`/wz3`) with link gating and carrier hangup emulation.
+  * `wb/wildspeed`: Benchmarking suite with per-bus-cycle-class MHz measurement.
+  * `wb/defs_updates`: Official hardware definitions matching shipping cores (`defs/wildbits.d`).
+  * `wb/play`: Independent per-machine audio leveling for K2 vs. Jr2.
+* **Overlaid Feature Branches at Build Time:**
+  * `wb/drivewire_hardening`: Aggressive error recovery and BAUDCE divisor 5 (230,400 baud).
+  * `wb/vs1053`: Dedicated `vs` command tool and equates for the hardware VS1053b MP3/audio decoder.
+  * `wb/mouse_hide_unhide`: Preserves cursor position across auto-hide rather than resetting to border.
+  * `wb/k2_core_typematic_support`: K2 hardware-typematic keyboard support (K2 only; unpopulated on Jr2).
+
+### 8.2 Hardware Source Truth (FPGA RTL)
+Traced directly from the authoritative core repository (`fpga-6809-cores-staging`, `nitrobotics`):
+* `CFP95139AJR2_Top.v`: Top-level pin mapping, clock generation, synthesizer enable frequencies.
+* `IRQ_Controller_Jr.v`: 32-line interrupt controller logic and concatenation vectors.
+* `TyVKy2_MMU_Register.v` / `TyVKy2K2x1_MMU_Register.v`: MMU LUT entry encoding, active vs. edit LUT selection, constant RAM enable bits (`$FFA1`), and `RAM_Access_Inhibit` logic.
+* `TyVKy2K2turbo_MMU_FNX6809.v`: Page decodes (`$FDxx`, `$FExx`, refined `$FF00–$FF9F` / `$FFB0–$FFEF`, `$FFAx`, `$FFFx`), turbo frame timing.
+* `TinyVKY2K2_IO_Page0_Devices.v`: Sectored I/O Page `$C0` sprite attribute BRAM decoding, `RecodedAddy[9:8]` selector fix (`v8_rc7`+).
+
+### 8.3 Operating System & Driver Implementation
+Traced from `nitros9project/nitros9` and parity release disk inspection:
+* `level2/modules/kernel/krn.asm`: Cold-start interrupt controller initialization, block map at `$0200`, Slot 2 reservation.
+* `level1/wildbits/modules/vtio.asm`: Text video driver, WM8776 `InitCODEC` 16-bit register stream, Layer control (`$FFC2`/`$FFC3`).
+* `level1/wildbits/modules/keydrv.asm`: PS/2 keyboard driver for Jr2.
+* `level1/wildbits/modules/wizfi.asm`: WizCon4 network driver.
+* `level1/wildbits/modules/llwbsd.asm`: Low-level SPI SD card driver.
+* `level1/wildbits/modules/rbmem.asm`: Flash and cartridge block access driver.
+
+### 8.4 Reference Packages & Parity Releases
+* **Wildbits Jr2 Parity Package:** `parity_wildbits_jr2_v8_rc11.zip` (Core built 2026-09-05 10:14; parity kit built 2026-09-06 01:07 by Roger Taylor).
+* **F256Jr2 Rev A Hardware Specifications:** Foenix Retro Systems Short Form Specification Sheet (`F256JR2_-_Specs_-_OneSheeter_RevA.png`).
+
+---
+
+## 9. Resolved Hardware Parameters & Authoritative Parity Truth
+
+### 9.1 Dynamic Layer Priority Multiplexer Bitfields (`$FFC2` / `$FFC3`)
+* **Hardware Truth:** TinyVicky II implements a 3-layer compositing pipeline (Layer 0, Layer 1, Layer 2). Each layer is configured via `$FFC2` (`LAYER_CTRL_0`) and `$FFC3` (`LAYER_CTRL_1`):
+  * **Layer 0 Source (`$FFC2[3:0]`):** `0` = `BM0`, `1` = `BM1`, `2` = `BM2`, `4` = `TL0`, `5` = `TL1`, `6` = `TL2` (bit 2 selects Tilemap vs. Bitmap).
+  * **Layer 1 Source (`$FFC2[7:4]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
+  * **Layer 2 Source (`$FFC3[3:0]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
+  * **`$FFC3[7:4]`:** Reserved / Unused.
+* **MAME Implementation:** In `screen_update_wbjr2()`, the rendering loop traverses Layers 2 down to 0 (or back-to-front), compositing whichever bitmap or tilemap plane is indexed by that layer's selector nibble, with sprites interleaved according to their `SPRITE_DEPTH` bits.
+
+### 9.2 Hardware Collision Detection Status
+* **Hardware Truth:** **No hardware collision detection logic exists on the Jr2.**
+  * On the full C256 Foenix (VICKY II), collision detection was implemented with two dedicated interrupts (`VEC_INT11_COL0` and `VEC_INT12_COL1`) and register latches (`BM_CONTROL_REG` bit 6).
+  * In the TinyVicky II core for the Jr2 (Artix-7 35T), collision logic was omitted from FPGA synthesis to conserve logic cells for the 6809 core, MMU, and triple sound generators.
+  * In the 32-line interrupt controller (`IRQ_Controller_Jr.v`), there are no collision interrupt lines (Group 0 only has SOF and SOL). In `defs/wildbits.d`, no collision registers exist.
+* **MAME Implementation:** Collision handling is 100% software-calculated by checking sprite bounding boxes. MAME does not allocate or emulate hardware collision registers.
+
+### 9.3 Tilemap Cell Attribute Format (Byte 1)
+* **Hardware Truth:** Each 2-byte tile cell in tilemap VRAM encodes:
+  * **Byte 0:** Tile Index (0..255).
+  * **Byte 1 (Attributes):**
+    * Bit 7: Horizontal Flip (X-flip).
+    * Bit 6: Vertical Flip (Y-flip).
+    * Bits 5..4: Per-tile priority over sprites.
+    * Bits 3..1: Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
+    * Bit 0: Palette / CLUT Bank Offset.
+
+### 9.4 Synthesizer Clock Enable Frequencies
+* **Hardware Truth:** Clocks are derived from the master 100 MHz system clock and 25.175 MHz dot clock:
+  * **Soft-SIDs (Triple MOS 6581/8580 in Page `$C4`):** Driven by a clock enable pulse producing **1,022,727 Hz** (exact Commodore 64 NTSC pitch).
+  * **Soft-PSGs (Triple SN76489 in Page `$C4`):** Driven by a clock enable pulse producing **3,579,545 Hz** (standard NTSC colorburst pitch).
+* **MAME Implementation:** Configured directly in MAME device definitions:
+  * `MOS6581(config, m_sid[i], 1022727)`
+  * `SN76489(config, m_psg[i], 3579545)`
+
+### 9.5 WM8776 Audio CODEC Initialization & Leveling
+* **Hardware Truth:** NitrOS-9 (`InitCODEC` in `vtio.asm`) initializes the Wolfson WM8776 via 16-bit register words written to `$FE70–$FE72`:
+  * `R23` (`0x2E00`): Software reset.
+  * `R10` (`0x1402`): DAC Interface Control — 16-bit I2S format.
+  * `R17` (`0x2301`): ALC Control 2.
+  * `R21` (`0x2A03`): ADC MUX Control (AIN selected).
+  * `R22` (`0x2C07`): Output MUX Control — MX[2:0] = 111 (Bypass, Aux, DAC active).
+  * `R13` (`0x1A00`): Power Down Control — all channels unmuted.
+  * `R03` (`0x07F0`): Left DAC attenuation.
+  * `R04` (`0x09F0`): Right DAC attenuation.
+  * `R00` (`0x016C`): Left Headphone volume.
+  * `R01` (`0x036C`): Right Headphone volume.
+* **Audio Leveling:** In the `wb/play` audio engine, Jr2 mixer gains are calibrated so PSG and SID levels balance with the SAM2695 MIDI synth, and raw `.rsd` playback is attenuated ~8 dB relative to `.mus` synth files.
+
+### 9.6 Physical Status of VS1053b on Jr2 (Populated at 24.576 MHz)
+* **Hardware Truth:** The VLSI Solution **VS1053b** audio codec / MP3 decoder is physically populated on the Wildbits Jr2 motherboard (confirmed by the official F256Jr2 Rev A hardware specification one-sheeter and the Nitrobotics portal).
+* **Jr2 Hardware Architecture:**
+  * **Master Clocking:** Driven at **24.576 MHz** on Jr2 (compared to 12.288 MHz on the K2).
+  * **Hardware Flow Control & Stream FIFO:** A 2,048-byte hardware SDI stream FIFO at `$FF57` buffers audio streaming data with hardware DREQ pacing.
+  * **Register Interface:** 16 SCI registers are accessible via index register `$FF51` and 16-bit data registers `$FF52–$FF53`.
+  * **Interrupt:** Asserts `INT_MIDI_VS_RX` on Interrupt Group 3, bit 4 (`NEW_Rx_FIFO_MIDI_VS_Sync`).
+  * **Software Tooling:** The dedicated `vs` command tool in `/CMDS` on `l2_wildbitsjr2.dsk` provides file playback and hardware verification tests.
+
+### 9.7 Pre-Loaded BRAM Assets (Bannerfont & Default Palette)
+* **Hardware Truth:** Starting in `v8_rc10`, the FPGA BRAMs are pre-initialized with the official OS-9 Bannerfont and palette:
+  * **Bannerfont:** 2,048 bytes (256 characters × 8 rows) pre-loaded in both Font Sets 0 & 1 in `FONT_CPU_Memory` (4,096 bytes). Extracted directly as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.bin) and [`bannerfont.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.h).
+  * **Default Palette:** 64 bytes (16 colors × 4 bytes `[Blue, Green, Red, Alpha]`) pre-loaded in `TEXT_CLR_LUT`. Extracted directly as [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.bin) and [`os9_palette.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.h).
+  * **Default Text Display:** Immediately at power-on, the text mode displays authentic NitrOS-9 Yellow (`#DDDD77`, Index 7) on Purple (`#FF7777`, Index 10) (`0x7A` attribute), eliminating the need for font/palette modules in bootfiles.
+
+### 9.8 Summary Matrix of Authoritative Hardware Parity
+
+| Subsystem Parameter | Authoritative Hardware Specification | Verification Source |
+| :--- | :--- | :--- |
+| **Layer Control 0 (`$FFC2`)** | `[7:4]` = Layer 1 source, `[3:0]` = Layer 0 source (`0..2` BM, `4..6` TM) | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
+| **Layer Control 1 (`$FFC3`)** | `[3:0]` = Layer 2 source (`0..2` BM, `4..6` TM), `[7:4]` reserved | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
+| **Sprite Collision** | **None** (100% software bounding-box calculations; no hardware registers) | `IRQ_Controller_Jr.v` & `defs/wildbits.d` |
+| **Tile Attributes** | Byte 1: `[7:HFlip, 6:VFlip, 5..4:Priority, 3..1:TileSet, 0:Palette]` | `TinyVKY2K2_IO_Page0_Devices.v` |
+| **Soft-SID Clock** | **1,022,727 Hz** (Commodore 64 NTSC pitch clock enable) | `CFP95139AJR2_Top.v` |
+| **Soft-PSG Clock** | **3,579,545 Hz** (NTSC colorburst pitch clock enable) | `CFP95139AJR2_Top.v` |
+| **WM8776 Init Words** | R23 (`0x2E00`), R10 (`0x1402`), R17 (`0x2301`), R21/R22 (`0x2A03`/`0x2C07`), R13 (`0x1A00`), R03/R04 (`0x07F0`/`0x09F0`), R00/R01 (`0x016C`/`0x036C`) | `level1/wildbits/modules/vtio.asm` |
+| **VS1053b Audio Decoder** | **Populated on Jr2** (24.576 MHz clock, 2KB SDI FIFO at `$FF57`, SCI at `$FF50–$FF53`) | F256Jr2 Rev A Spec Sheet & Nitrobotics Portal |
+| **Cartridge Port (`$80–$9F`)** | **External Flash Cartridge Port** (`/c0` @ `$80`, `/c1` @ `$90`; no internal EXRAM) | `Wildbits OS-9 512K Physical Map.htm` & `rbmem` |
+| **Primary Keyboard** | **PS/2 Mini-DIN exclusively** (`$FE50–$FE54`; no optical keyboard or typematic) | `IRQ_Controller_Jr.v` & `keydrv.asm` |
+| **Network Interface** | **WizFi360 Wi-Fi only** (`$FF20–$FF29`; no W5100S/W6100 Ethernet) | `IRQ_Controller_Jr.v` & `wizfi.asm` |
+| **DIP Switches (`$FF90`)** | **Onboard 8-position DIP switch** (Bit 0: Turbo stretch mode ~1.4x, Bit 7: Gamma) | `Wildbits K2 Memory Atlas.htm` & F256Jr2 Specs |
+| **OS-9 Bannerfont** | 2,048 B pre-loaded in BRAM Font Sets 0 & 1 | `bannerfont.bin` / `Font_OS9_bannerfont.coe` |
+| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, Yellow on Purple) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
+
+---
+
+## 10. Current MAME Implementation Status
+
+### 10.1 Implementation Status Matrix
 
 | Subsystem | Hardware Specification | Current Emulator Status | Verification & Functional Scope |
 | :--- | :--- | :--- | :--- |
@@ -1274,7 +1402,7 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
 | **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* | `$FEC0` is unmapped. |
 | **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* | MAME currently runs with `MACHINE_NO_SOUND_HW`. |
 
-### 8.2 Resolved Emulator Parity Revisions
+### 10.2 Resolved Emulator Parity Revisions
 
 The following core peripheral and memory mapping revisions have been implemented in `src/mame/wildbits/wildbits_jr2.cpp` to align with hardware specifications:
 
@@ -1307,131 +1435,3 @@ The following core peripheral and memory mapping revisions have been implemented
 
 8. **Updated SAM2695 MIDI Register `$FF30` Edition 2**:
    * Aligned `$FF30` status bits with `v8_rc11`: Bit 3 Tx-empty, Bit 2 Rx-empty, Bit 1 FIFO reset.
-
----
-
-## 9. Primary References & Verification Sources
-
-### 9.1 Authoritative Ground Truth Hierarchy & Branch Overlay Model
-
-In developing and verifying the Wildbits Jr2 architecture, the primary source of truth is the **Nitrobotics Resource Portal** (`https://nitrobotics.github.io/Wildbits/`) and the shipping hardware parity kits (`parity_wildbits_jr2_v8_rc11`).
-
-Under the Nitrobotics development workflow, disk images are built from `nitros9/main` with active feature and hardware bugfix branches overlaid onto the tree at build time:
-
-* **Merged Branches in Shipping Main:**
-  * `wb/fixes_bundle`: MMU Slot 2 safety fix (permanent reservation in `krn.asm`), interrupt-controller cold scrub.
-  * `wb/wizcon4`: Four independent packet-mode WiFi channels (`/wz0`–`/wz3`) with link gating and carrier hangup emulation.
-  * `wb/wildspeed`: Benchmarking suite with per-bus-cycle-class MHz measurement.
-  * `wb/defs_updates`: Official hardware definitions matching shipping cores (`defs/wildbits.d`).
-  * `wb/play`: Independent per-machine audio leveling for K2 vs. Jr2.
-* **Overlaid Feature Branches at Build Time:**
-  * `wb/drivewire_hardening`: Aggressive error recovery and BAUDCE divisor 5 (230,400 baud).
-  * `wb/vs1053`: Dedicated `vs` command tool and equates for the hardware VS1053b MP3/audio decoder.
-  * `wb/mouse_hide_unhide`: Preserves cursor position across auto-hide rather than resetting to border.
-  * `wb/k2_core_typematic_support`: K2 hardware-typematic keyboard support (K2 only; unpopulated on Jr2).
-
-### 9.2 Hardware Source Truth (FPGA RTL)
-Traced directly from the authoritative core repository (`fpga-6809-cores-staging`, `nitrobotics`):
-* `CFP95139AJR2_Top.v`: Top-level pin mapping, clock generation, synthesizer enable frequencies.
-* `IRQ_Controller_Jr.v`: 32-line interrupt controller logic and concatenation vectors.
-* `TyVKy2_MMU_Register.v` / `TyVKy2K2x1_MMU_Register.v`: MMU LUT entry encoding, active vs. edit LUT selection, constant RAM enable bits (`$FFA1`), and `RAM_Access_Inhibit` logic.
-* `TyVKy2K2turbo_MMU_FNX6809.v`: Page decodes (`$FDxx`, `$FExx`, refined `$FF00–$FF9F` / `$FFB0–$FFEF`, `$FFAx`, `$FFFx`), turbo frame timing.
-* `TinyVKY2K2_IO_Page0_Devices.v`: Sectored I/O Page `$C0` sprite attribute BRAM decoding, `RecodedAddy[9:8]` selector fix (`v8_rc7`+).
-
-### 9.3 Operating System & Driver Implementation
-Traced from `nitros9project/nitros9` and parity release disk inspection:
-* `level2/modules/kernel/krn.asm`: Cold-start interrupt controller initialization, block map at `$0200`, Slot 2 reservation.
-* `level1/wildbits/modules/vtio.asm`: Text video driver, WM8776 `InitCODEC` 16-bit register stream, Layer control (`$FFC2`/`$FFC3`).
-* `level1/wildbits/modules/keydrv.asm`: PS/2 keyboard driver for Jr2.
-* `level1/wildbits/modules/wizfi.asm`: WizCon4 network driver.
-* `level1/wildbits/modules/llwbsd.asm`: Low-level SPI SD card driver.
-* `level1/wildbits/modules/rbmem.asm`: Flash and cartridge block access driver.
-
-### 9.4 Reference Packages & Parity Releases
-* **Wildbits Jr2 Parity Package:** `parity_wildbits_jr2_v8_rc11.zip` (Core built 2026-09-05 10:14; parity kit built 2026-09-06 01:07 by Roger Taylor).
-* **F256Jr2 Rev A Hardware Specifications:** Foenix Retro Systems Short Form Specification Sheet (`F256JR2_-_Specs_-_OneSheeter_RevA.png`).
-
----
-
-## 10. Resolved Hardware Parameters & Authoritative Parity Truth
-
-### 10.1 Dynamic Layer Priority Multiplexer Bitfields (`$FFC2` / `$FFC3`)
-* **Hardware Truth:** TinyVicky II implements a 3-layer compositing pipeline (Layer 0, Layer 1, Layer 2). Each layer is configured via `$FFC2` (`LAYER_CTRL_0`) and `$FFC3` (`LAYER_CTRL_1`):
-  * **Layer 0 Source (`$FFC2[3:0]`):** `0` = `BM0`, `1` = `BM1`, `2` = `BM2`, `4` = `TL0`, `5` = `TL1`, `6` = `TL2` (bit 2 selects Tilemap vs. Bitmap).
-  * **Layer 1 Source (`$FFC2[7:4]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
-  * **Layer 2 Source (`$FFC3[3:0]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
-  * **`$FFC3[7:4]`:** Reserved / Unused.
-* **MAME Implementation:** In `screen_update_wbjr2()`, the rendering loop traverses Layers 2 down to 0 (or back-to-front), compositing whichever bitmap or tilemap plane is indexed by that layer's selector nibble, with sprites interleaved according to their `SPRITE_DEPTH` bits.
-
-### 10.2 Hardware Collision Detection Status
-* **Hardware Truth:** **No hardware collision detection logic exists on the Jr2.**
-  * On the full C256 Foenix (VICKY II), collision detection was implemented with two dedicated interrupts (`VEC_INT11_COL0` and `VEC_INT12_COL1`) and register latches (`BM_CONTROL_REG` bit 6).
-  * In the TinyVicky II core for the Jr2 (Artix-7 35T), collision logic was omitted from FPGA synthesis to conserve logic cells for the 6809 core, MMU, and triple sound generators.
-  * In the 32-line interrupt controller (`IRQ_Controller_Jr.v`), there are no collision interrupt lines (Group 0 only has SOF and SOL). In `defs/wildbits.d`, no collision registers exist.
-* **MAME Implementation:** Collision handling is 100% software-calculated by checking sprite bounding boxes. MAME does not allocate or emulate hardware collision registers.
-
-### 10.3 Tilemap Cell Attribute Format (Byte 1)
-* **Hardware Truth:** Each 2-byte tile cell in tilemap VRAM encodes:
-  * **Byte 0:** Tile Index (0..255).
-  * **Byte 1 (Attributes):**
-    * Bit 7: Horizontal Flip (X-flip).
-    * Bit 6: Vertical Flip (Y-flip).
-    * Bits 5..4: Per-tile priority over sprites.
-    * Bits 3..1: Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
-    * Bit 0: Palette / CLUT Bank Offset.
-
-### 10.4 Synthesizer Clock Enable Frequencies
-* **Hardware Truth:** Clocks are derived from the master 100 MHz system clock and 25.175 MHz dot clock:
-  * **Soft-SIDs (Triple MOS 6581/8580 in Page `$C4`):** Driven by a clock enable pulse producing **1,022,727 Hz** (exact Commodore 64 NTSC pitch).
-  * **Soft-PSGs (Triple SN76489 in Page `$C4`):** Driven by a clock enable pulse producing **3,579,545 Hz** (standard NTSC colorburst pitch).
-* **MAME Implementation:** Configured directly in MAME device definitions:
-  * `MOS6581(config, m_sid[i], 1022727)`
-  * `SN76489(config, m_psg[i], 3579545)`
-
-### 10.5 WM8776 Audio CODEC Initialization & Leveling
-* **Hardware Truth:** NitrOS-9 (`InitCODEC` in `vtio.asm`) initializes the Wolfson WM8776 via 16-bit register words written to `$FE70–$FE72`:
-  * `R23` (`0x2E00`): Software reset.
-  * `R10` (`0x1402`): DAC Interface Control — 16-bit I2S format.
-  * `R17` (`0x2301`): ALC Control 2.
-  * `R21` (`0x2A03`): ADC MUX Control (AIN selected).
-  * `R22` (`0x2C07`): Output MUX Control — MX[2:0] = 111 (Bypass, Aux, DAC active).
-  * `R13` (`0x1A00`): Power Down Control — all channels unmuted.
-  * `R03` (`0x07F0`): Left DAC attenuation.
-  * `R04` (`0x09F0`): Right DAC attenuation.
-  * `R00` (`0x016C`): Left Headphone volume.
-  * `R01` (`0x036C`): Right Headphone volume.
-* **Audio Leveling:** In the `wb/play` audio engine, Jr2 mixer gains are calibrated so PSG and SID levels balance with the SAM2695 MIDI synth, and raw `.rsd` playback is attenuated ~8 dB relative to `.mus` synth files.
-
-### 10.6 Physical Status of VS1053b on Jr2 (Populated at 24.576 MHz)
-* **Hardware Truth:** The VLSI Solution **VS1053b** audio codec / MP3 decoder is physically populated on the Wildbits Jr2 motherboard (confirmed by the official F256Jr2 Rev A hardware specification one-sheeter and the Nitrobotics portal).
-* **Jr2 Hardware Architecture:**
-  * **Master Clocking:** Driven at **24.576 MHz** on Jr2 (compared to 12.288 MHz on the K2).
-  * **Hardware Flow Control & Stream FIFO:** A 2,048-byte hardware SDI stream FIFO at `$FF57` buffers audio streaming data with hardware DREQ pacing.
-  * **Register Interface:** 16 SCI registers are accessible via index register `$FF51` and 16-bit data registers `$FF52–$FF53`.
-  * **Interrupt:** Asserts `INT_MIDI_VS_RX` on Interrupt Group 3, bit 4 (`NEW_Rx_FIFO_MIDI_VS_Sync`).
-  * **Software Tooling:** The dedicated `vs` command tool in `/CMDS` on `l2_wildbitsjr2.dsk` provides file playback and hardware verification tests.
-
-### 10.7 Pre-Loaded BRAM Assets (Bannerfont & Default Palette)
-* **Hardware Truth:** Starting in `v8_rc10`, the FPGA BRAMs are pre-initialized with the official OS-9 Bannerfont and palette:
-  * **Bannerfont:** 2,048 bytes (256 characters × 8 rows) pre-loaded in both Font Sets 0 & 1 in `FONT_CPU_Memory` (4,096 bytes). Extracted directly as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.bin) and [`bannerfont.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.h).
-  * **Default Palette:** 64 bytes (16 colors × 4 bytes `[Blue, Green, Red, Alpha]`) pre-loaded in `TEXT_CLR_LUT`. Extracted directly as [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.bin) and [`os9_palette.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.h).
-  * **Default Text Display:** Immediately at power-on, the text mode displays authentic NitrOS-9 Yellow (`#DDDD77`, Index 7) on Purple (`#FF7777`, Index 10) (`0x7A` attribute), eliminating the need for font/palette modules in bootfiles.
-
-### 10.8 Summary Matrix of Authoritative Hardware Parity
-
-| Subsystem Parameter | Authoritative Hardware Specification | Verification Source |
-| :--- | :--- | :--- |
-| **Layer Control 0 (`$FFC2`)** | `[7:4]` = Layer 1 source, `[3:0]` = Layer 0 source (`0..2` BM, `4..6` TM) | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
-| **Layer Control 1 (`$FFC3`)** | `[3:0]` = Layer 2 source (`0..2` BM, `4..6` TM), `[7:4]` reserved | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
-| **Sprite Collision** | **None** (100% software bounding-box calculations; no hardware registers) | `IRQ_Controller_Jr.v` & `defs/wildbits.d` |
-| **Tile Attributes** | Byte 1: `[7:HFlip, 6:VFlip, 5..4:Priority, 3..1:TileSet, 0:Palette]` | `TinyVKY2K2_IO_Page0_Devices.v` |
-| **Soft-SID Clock** | **1,022,727 Hz** (Commodore 64 NTSC pitch clock enable) | `CFP95139AJR2_Top.v` |
-| **Soft-PSG Clock** | **3,579,545 Hz** (NTSC colorburst pitch clock enable) | `CFP95139AJR2_Top.v` |
-| **WM8776 Init Words** | R23 (`0x2E00`), R10 (`0x1402`), R17 (`0x2301`), R21/R22 (`0x2A03`/`0x2C07`), R13 (`0x1A00`), R03/R04 (`0x07F0`/`0x09F0`), R00/R01 (`0x016C`/`0x036C`) | `level1/wildbits/modules/vtio.asm` |
-| **VS1053b Audio Decoder** | **Populated on Jr2** (24.576 MHz clock, 2KB SDI FIFO at `$FF57`, SCI at `$FF50–$FF53`) | F256Jr2 Rev A Spec Sheet & Nitrobotics Portal |
-| **Cartridge Port (`$80–$9F`)** | **External Flash Cartridge Port** (`/c0` @ `$80`, `/c1` @ `$90`; no internal EXRAM) | `Wildbits OS-9 512K Physical Map.htm` & `rbmem` |
-| **Primary Keyboard** | **PS/2 Mini-DIN exclusively** (`$FE50–$FE54`; no optical keyboard or typematic) | `IRQ_Controller_Jr.v` & `keydrv.asm` |
-| **Network Interface** | **WizFi360 Wi-Fi only** (`$FF20–$FF29`; no W5100S/W6100 Ethernet) | `IRQ_Controller_Jr.v` & `wizfi.asm` |
-| **DIP Switches (`$FF90`)** | **Onboard 8-position DIP switch** (Bit 0: Turbo stretch mode ~1.4x, Bit 7: Gamma) | `Wildbits K2 Memory Atlas.htm` & F256Jr2 Specs |
-| **OS-9 Bannerfont** | 2,048 B pre-loaded in BRAM Font Sets 0 & 1 | `bannerfont.bin` / `Font_OS9_bannerfont.coe` |
-| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, Yellow on Purple) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
