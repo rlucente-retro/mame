@@ -2429,7 +2429,7 @@ void wildbits_jr2_state::device_stop()
 		for (int c = 0; c < 80; c++)
 		{
 			uint8_t ch = m_vram_c2[r * 80 + c];
-			line[c] = (ch >= 32 && ch < 127) ? ch : ' ';
+			line[c] = (ch >= 32 && ch < 127) ? ch : (ch == 0x20 || ch == 0x00) ? ' ' : '#';
 		}
 		line[80] = 0;
 		printf("%02d: |%s|\n", r, line);
