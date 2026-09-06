@@ -1231,7 +1231,7 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
 | :--- | :--- | :--- | :--- |
 | **Bit 7** | `%10000000` | `SW_GAMMA_ON` | Hardware default for TinyVicky Gamma correction (`1` = Enabled on boot). |
 | **Bits 6..4** | `%01110000` | `SW_USER2..0` | General user-configurable DIP switches. |
-| **Bits 3..0** | `%00001111` | `SW_BOOT_MODE3..0` | Hardware boot source selection. **Bit 0 (`SW_BOOT_MODE0`)** serves as the **Turbo Gate** on `v8` cores: `1` = stretch turbo allowed (live-flippable at runtime). |
+| **Bits 3..0** | `%00001111` | `SW_BOOT_MODE3..0` | Hardware boot source selection. **Bit 0 (`SW_BOOT_MODE0`)** serves as the **Turbo Gate** on `v8` cores: active-low in hardware (`0` = switch closed / Turbo stretch mode allowed; `1` = switch open / stock 6.29 MHz clock). |
 
 #### Turbo Stretch Mode (~1.4x) & `FASTWR_LATE2`:
 * **Operation:** In stock mode, the 6809 CPU core executes at 6.29 MHz with standard 32-tick bus frames. In Turbo stretch mode (enabled via DIP switch bit 0), instruction fetch frames are shortened to 24 ticks, achieving an effective CPU throughput of **~8.8 MHz (~1.4x speedup)** while keeping peripheral I/O frames at full length for timing safety (`TURBO_FASTWRITE`).
@@ -1239,6 +1239,11 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
   * The Jr2's external SRAM is an ISSI IS61WV102416FBLL-8BLI (1M × 16, 8ns). In early fast-write cores, write enable was asserted at tick 7, leaving only 5 ns of address setup from the MMU map registers, which could strobe stale addresses from the graphics engine's last fetch during background SD writes. This surfaced as video "sparklies" on displayed bitmaps.
   * `FASTWR_LATE2` delays write enable (`WE_n`) to ticks 9–11 of the write frame (slot released at tick 12), granting a full **15 ns address setup time**. Address pulse and hold times remain unchanged.
 * **Peripheral Compatibility:** The `v8_rc6`+ FPGA cores ensure that shaped write strobes (Flash, Cartridge) and fractional baud clocks (`BAUDCE`) maintain byte-identical timing geometry whether Turbo mode is active or disabled.
+* **MAME Command-Line Control (`-bios`):**
+  * Turbo stretch mode is switchable on the MAME command line using the `-bios` flag:
+    * `mame wbjr2 -bios turbo` (or default): Bit 0 = 0 (Turbo Stretch Mode ~8.8 MHz enabled; FEU displays `... - Flash - Turbo`).
+    * `mame wbjr2 -bios stock`: Bit 0 = 1 (Stock Clock 6.29 MHz; FEU displays `... - Flash`).
+    * `mame wbjr2 -listbios`: Displays available BIOS options.
 
 ---
 
@@ -1388,7 +1393,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** | Inversion at cursor position verified. |
 | **PS/2 Keyboard & Mouse** | Host matrix to PS/2 Set 2 scan codes at `$FE50-$FE54` | **Completed & Verified** | Interactive typing and mouse packet FIFO verified. |
 | **Real-Time Clock (RTC)** | bq4802 RTC registers at `$FE40-$FE4F` | **Completed & Verified** | Correctly mapped at `$FE40-$FE4F` with bq4802 BCD register layout; verified NitrOS-9 `clock` driver date/time synchronization on boot. |
-| **Hardware DIP Switches** | Motherboard DIP switches at `$FF90` (Gamma, Turbo stretch ~1.4x, boot modes) | **Completed & Verified** | Mapped at `$FF90` and connected to MAME `DIPSW` input ports. |
+| **Hardware DIP Switches** | Motherboard DIP switches at `$FF90` (Gamma, Turbo stretch ~1.4x, boot modes) | **Completed & Verified** | Mapped at `$FF90` and connected to MAME `DIPSW` input ports and `-bios` CLI options (`-bios turbo`, `-bios stock`). |
 | **WizFi360 Wi-Fi** | Dual 2KB FIFOs at `$FF20-$FF29`, WizCon4 multi-socket engine | **Completed & Verified** | Verified AT engine, WizCon4 4-socket telnet sessions, `INT_WIZFI_RX` (Group 3 bit 0), and `INT_WIZFI_TX` (Group 3 bit 5). |
 | **SAM2695 MIDI Synth** | Edition 2 register at `$FF30` (Tx/Rx empty, FIFO reset)| **Completed & Verified** | Aligned with `v8_rc11` FIFO status flags. |
 | **Built-in Font & Palette** | Embedded OS-9 Bannerfont and Palette in BRAM | **Completed & Verified** | Shows OS-9 font and palette from power-on. |
@@ -1427,8 +1432,11 @@ The following core peripheral and memory mapping revisions have been implemented
    * Asserting **`INT_UART`** (`Group 1, bit 0`) when RX FIFO bytes arrive in `poll_uart_socket()` and `m_uart_ier & 0x01` is enabled.
    * Enabling `IER` bit 0 when bytes are pending immediately asserts `INT_UART`.
 
-6. **Mapped Hardware Configuration DIP Switches at `$FF90`**:
+6. **Mapped Hardware Configuration DIP Switches at `$FF90` & Added Command-Line `-bios` Options**:
    * Added read handler for `$FF90` (`DIP_SW`) bound to MAME `DIPSW` input port with settings for Gamma enable, Turbo stretch mode (~1.4x), user switches, and boot mode.
+   * Implemented MAME System BIOS options to allow selecting Turbo Stretch Mode vs Stock clock from the command line:
+     * `-bios turbo` (default): Bit 0 = 0 (switch ON / Turbo Stretch Mode ~8.8 MHz enabled; FEU displays `... - Flash - Turbo`).
+     * `-bios stock`: Bit 0 = 1 (switch OFF / Stock 6.29 MHz clock; FEU displays `... - Flash`).
 
 7. **Aligned INTC Edge Register Reset Default (`EDGE = $FF`)**:
    * Set `m_int_edge[0..3] = 0xFF` at reset in `machine_reset()` matching `IRQ_Controller_Jr.v` hardware edge-sensitive defaults.

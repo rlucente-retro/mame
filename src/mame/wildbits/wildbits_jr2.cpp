@@ -612,7 +612,19 @@ void wildbits_jr2_state::codec_w(offs_t offset, uint8_t data)
 // Hardware Configuration DIP Switches ($FF90)
 uint8_t wildbits_jr2_state::dipsw_r()
 {
-	return m_dipsw->read();
+	uint8_t val = m_dipsw->read();
+	// Command-line -bios option:
+	//   "-bios turbo" (default): Bit 0 = 0 (Active-low switch ON / Turbo Stretch Mode ~1.4x enabled)
+	//   "-bios stock":           Bit 0 = 1 (Active-low switch OFF / Stock 6.29 MHz clock, Turbo disabled)
+	if (system_bios() == 2)
+	{
+		val |= 0x01; // Bit 0 = 1 (Stock 6.29 MHz)
+	}
+	else if (system_bios() == 1)
+	{
+		val &= ~0x01; // Bit 0 = 0 (Turbo Stretch Mode ~8.8 MHz)
+	}
+	return val;
 }
 
 // Interrupt Controller ($FE20 - $FE2F)
@@ -2685,6 +2697,9 @@ INPUT_PORTS_END
 
 ROM_START(wbjr2)
 	ROM_REGION(0x80000, "flash", ROMREGION_ERASEFF)
+	ROM_SYSTEM_BIOS(0, "turbo", "Turbo Stretch Mode (~8.8 MHz)")
+	ROM_SYSTEM_BIOS(1, "stock", "Stock Clock (6.29 MHz)")
+	ROM_DEFAULT_BIOS("turbo")
 	ROM_LOAD("f0.dsk", 0x70000, 0x0a000, NO_DUMP)
 	ROM_LOAD("booter", 0x7a000, 0x06000, NO_DUMP)
 ROM_END
