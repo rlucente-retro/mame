@@ -313,21 +313,50 @@ TinyVicky II text mode geometry is governed by **Master Control Register 1 (`$FF
 * **Bit 0 (`CLK_70` = `$01`):** Selects 70Hz refresh rate (400 vertical scanlines) instead of standard 60Hz (480 scanlines).
 * **Hardware Default:** On boot, the system initializes to **80 columns × 30 rows** (`DBL_Y = 1`, `DBL_X = 0`, `m_vky_mstr_ctrl_1 = 0x04`).
 
-### 4.2 Text Color Palette Architecture
+### 4.2 Text Color Palette Architecture & Pre-Loaded Assets
 
 Unlike standard VGA, TinyVicky separates text foreground and background color lookups into dedicated hardware tables located in **Block `$C0`**:
 
 * **Foreground CLUT:** Block `$C0` at offset `$1700` (`$1700 + fg_idx * 4`)
 * **Background CLUT:** Block `$C0` at offset `$1740` (`$1740 + bg_idx * 4`)
-* **Color Entry Format (4 bytes):** `[Blue, Green, Red, Alpha / Reserved]`
+* **Color Entry Format (4 bytes):** `[Blue, Green, Red, Alpha / Reserved]` (Big-Endian byte order in hardware: Byte 0 = Blue, Byte 1 = Green, Byte 2 = Red, Byte 3 = Alpha/0).
 * **Authentic NitrOS-9 Colors:**
-  * Foreground `Index 7` = **Yellow** (`R=$FF, G=$FF, B=$00`)
-  * Background `Index 10` (`0x0A`) = **Purple** (`R=$4F, G=$00, B=$80`)
+  * Foreground `Index 7` = **Yellow** (`B=$77, G=$DD, R=$DD`, RGB `#DDDD77`)
+  * Background `Index 10` (`0x0A`) = **Purple** (`B=$77, G=$77, R=$FF`, RGB `#FF7777`)
   * Default Character Attribute Byte = `0x7A` (Yellow on Purple)
-* **Pre-Loaded OS-9 Font & Palette in FPGA BRAM (`v8_rc10`+):**
-  * `TEXT_CLR_LUT` is pre-initialized with the OS-9 palette (`mif/Text_LUT_OS9_palette.coe`).
-  * `FONT_CPU_Memory` (4,096 bytes) is pre-initialized with the **OS-9 Bannerfont** in *both* font sets (`mif/Font_OS9_bannerfont.coe`).
-  * The screen presents the authentic OS-9 font and palette immediately from power-on (even in the FEU), freeing >2 KB of RAM previously consumed by font and palette modules in the bootfile.
+
+#### 1. Complete Default OS-9 Color Lookup Table (64 Bytes)
+Pre-initialized directly into FPGA BRAM (`TEXT_CLR_LUT`, `mif/Text_LUT_OS9_palette.coe`):
+
+| Index | Hardware Bytes `[B, G, R, A]` | RGB 24-bit | Authentic Role in NitrOS-9 |
+| :---: | :---: | :---: | :--- |
+| **0** | `0x00, 0x00, 0x00, 0x00` | `#000000` | Black |
+| **1** | `0xFF, 0xFF, 0xFF, 0x00` | `#FFFFFF` | Bright White |
+| **2** | `0x00, 0x00, 0x88, 0x00` | `#880000` | Dark Blue |
+| **3** | `0xEE, 0xFF, 0xAA, 0x00` | `#AAFFEE` | Cyan / Aqua |
+| **4** | `0xCC, 0x4C, 0xCC, 0x00` | `#CC4CCC` | Medium Violet |
+| **5** | `0x55, 0xCC, 0x00, 0x00` | `#00CC55` | Green |
+| **6** | `0xAA, 0x00, 0x00, 0x00` | `#0000AA` | Blue |
+| **7** | `0x77, 0xDD, 0xDD, 0x00` | **`#DDDD77`** | **Default Foreground: Yellow** |
+| **8** | `0x55, 0x88, 0xDD, 0x00` | `#DD8855` | Orange |
+| **9** | `0x00, 0x44, 0x66, 0x00` | `#664400` | Brown |
+| **10** (`$A`)| `0x77, 0x77, 0xFF, 0x00` | **`#FF7777`** | **Default Background: Purple / Magenta** |
+| **11** | `0x33, 0x33, 0x33, 0x00` | `#333333` | Dark Gray |
+| **12** | `0x77, 0x77, 0x77, 0x00` | `#777777` | Medium Gray |
+| **13** | `0x66, 0xFF, 0xAA, 0x00` | `#AAFF66` | Light Green |
+| **14** | `0xFF, 0x88, 0x00, 0x00` | `#0088FF` | Light Blue / Red-Orange |
+| **15** | `0xBB, 0xBB, 0xBB, 0x00` | `#BBBBBB` | Light Gray |
+
+#### 2. Pre-Loaded OS-9 Bannerfont Architecture (4,096 Bytes)
+* **Pre-Initialized FPGA BRAM:** `FONT_CPU_Memory` (4,096 bytes, mapped at Block `$C1`) is pre-loaded in *both* Font Set 0 (`$0000–$07FF`) and Font Set 1 (`$0800–$0FFF`) with the **OS-9 Bannerfont** (`mif/Font_OS9_bannerfont.coe`).
+* **Geometry:** 256 character glyphs per set, 8 vertical scanlines per glyph (1 byte per row, MSB on left).
+* **Glyph Allocations:**
+  * `$00`: Space / Blank.
+  * `$01 - $15`: Custom NitrOS-9 system, window frame, and Basic09 block-graphic glyphs designed by Matt Massie (corners, shaded blocks, half-blocks, diagonal ramps, arrows).
+  * `$16 - $1F`: Formatting and special control glyphs.
+  * `$20 - $7E`: Full standard ASCII character set.
+  * `$7F - $FF`: Extended international, accented, and box-drawing symbols.
+* **Bootfile Space Savings:** By embedding the font and palette directly into FPGA BRAM at power-on (`v8_rc10`+), NitrOS-9 Level 1 (FEU) and Level 2 bootfiles omit `palette` and `bannerfont` modules, saving over 2 KB of memory. Both raw binary assets are extracted as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.bin) and [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.bin).
 
 ### 4.3 Hardware Text Cursor Registers (`$FFD0 - $FFD7`)
 
@@ -488,7 +517,50 @@ TinyVicky provides dedicated hardware Gamma correction tables to equalize color 
   * `$FEA0` (`MS_MEN`): Bit 0 = Cursor Visible, Bit 1 = Mode (`0` = Host CPU updates coordinates, `1` = Hardware auto-tracks PS/2 mouse packets directly from `$FE53`).
   * `$FEA2-$FEA3`: 16-bit Mouse X position.
   * `$FEA4-$FEA5`: 16-bit Mouse Y position.
-  * `$FEA6-$FEA8`: Raw PS/2 mouse packet bytes.
+
+---
+
+### 4.8 TinyVicky II Layer Compositor & Hardware Collision Architecture
+
+#### 1. Three-Plane Layer Multiplexer (`$FFC2` / `$FFC3`):
+TinyVicky II features a 3-layer compositor (Layer 0, Layer 1, Layer 2) where each layer can be dynamically mapped to either a Bitmap or Tilemap plane:
+
+* **`$FFC2` (`LAYER_CTRL_0`):**
+  * **Bits `[3:0]` — Layer 0 Source:**
+    * `0` = Bitmap 0 (`BM0`)
+    * `1` = Bitmap 1 (`BM1`)
+    * `2` = Bitmap 2 (`BM2`)
+    * `4` = Tilemap 0 (`TL0`) (Bit 2 is the Tilemap selector)
+    * `5` = Tilemap 1 (`TL1`)
+    * `6` = Tilemap 2 (`TL2`)
+  * **Bits `[7:4]` — Layer 1 Source:**
+    * `0..2` = Bitmap 0..2
+    * `4..6` = Tilemap 0..2
+* **`$FFC3` (`LAYER_CTRL_1`):**
+  * **Bits `[3:0]` — Layer 2 Source:**
+    * `0..2` = Bitmap 0..2
+    * `4..6` = Tilemap 0..2
+  * **Bits `[7:4]`:** Reserved / Unused.
+
+#### 2. Sprite Interleaving Depth (`SPRITE_DEPTH`):
+Sprites composite between the three graphics layers using the 2-bit `SPRITE_DEPTH` field in each sprite's attribute byte (`CTRL[4:3]`):
+* `00` = In front of Layer 0 (total foreground).
+* `01` = Between Layer 0 and Layer 1.
+* `10` = Between Layer 1 and Layer 2.
+* `11` = Behind Layer 2 (total background, in front of background color).
+
+#### 3. Tilemap Cell Attribute Encoding (Byte 1):
+Each tile cell in tilemap VRAM consists of 2 bytes (Byte 0: Tile Index, Byte 1: Attributes):
+* **Bit 7:** Horizontal Flip (X-flip / mirror horizontal).
+* **Bit 6:** Vertical Flip (Y-flip / mirror vertical).
+* **Bits 5..4:** Tile Layer Priority over sprites.
+* **Bits 3..1:** Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
+* **Bit 0:** Palette / CLUT Bank Offset.
+
+#### 4. Hardware Collision Detection Policy:
+* **Omitted from FPGA Synthesis on Jr2:** On the large C256 Foenix (VICKY II), hardware sprite-to-sprite and sprite-to-bitmap collision detection logic was implemented with dedicated interrupts (`VEC_INT11_COL0` and `VEC_INT12_COL1`) and register latches (`BM_CONTROL_REG` bit 6).
+* **Jr2 Hardware Truth:** To fit the 6809 CPU core, MMU, triple SID, triple PSG, SAM2695 MIDI, and DMA inside the Artix-7 35T's 20,800 LUTs, hardware collision logic was completely omitted from synthesis.
+* **Emulation Rule for MAME:** In `tinyvicky_device`, sprite-to-sprite and sprite-to-tile collisions are **100% software-calculated** by client programs via bounding-box coordinate math. The Jr2 interrupt controller (`IRQ_Controller_Jr.v`) has zero collision interrupt inputs, and no collision status registers exist in the address map.
 
 ---
 
@@ -1032,11 +1104,13 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
   * `SIDM` (Center / Mono Channel): Page offset `$0080 - $009F`.
   * `SIDR` (Right Channel): Page offset `$0100 - $011F`.
   * Total of 9 analog/synth voices with programmable waveforms (Triangle, Sawtooth, Variable Pulse, Noise), ADSR envelopes, ring modulation, and sync.
+  * **Clock Enable Frequency:** Driven from the 100 MHz master system clock via a clock enable yielding **1,022,727 Hz** (exact Commodore 64 NTSC pitch).
 * **Triple Texas Instruments SN76489 Programmable Sound Generators (PSGs):**
   * `PSGL` (Left Channel): Page offset `$0200 - $0207` (3 square wave tone channels + 1 periodic/white noise channel).
   * `PSGM` (Center / Mono Channel): Page offset `$0208 - $020F`.
   * `PSGR` (Right Channel): Page offset `$0210 - $0217`.
   * Total of 12 tone and noise voices.
+  * **Clock Enable Frequency:** Driven from the master clock via a clock enable yielding **3,579,545 Hz** (standard NTSC colorburst pitch).
 * **Stereo / Mono Channel Routing:** System Control Register 1 (`$FE01`) configures stereo panning:
   * Bit 3 (`SYS_SID_ST`): 1 = Route SIDL to Left and SIDR to Right; 0 = Mono mix (all channels centered).
   * Bit 2 (`SYS_PSG_ST`): 1 = Route PSGL to Left and PSGR to Right; 0 = Mono mix.
@@ -1047,6 +1121,17 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
   * `$FE70` (`CODECCmdLo`): Low 8 bits of command word.
   * `$FE71` (`CODECCmdHi`): High bits of command word (7-bit register address + MSB data bit 8).
   * `$FE72` (`CODECStat` / `CODECCtrl`): Write `1` to strobe command transmission (`START`); Read bit 7 for `BUSY` status.
+* **Standard 16-Bit Initialization Sequence (`InitCODEC` in `vtio.asm`):**
+  * `R23` (`0x2E00`): Software reset WM8776 to default state.
+  * `R10` (`0x1402`): DAC Interface Control — 16-bit I2S audio format.
+  * `R17` (`0x2301`): ALC Control 2.
+  * `R21` (`0x2A03`): ADC MUX Control (AIN selected).
+  * `R22` (`0x2C07`): Output MUX Control — MX[2:0] = 111 (Bypass, Aux, DAC enabled).
+  * `R13` (`0x1A00`): Power Down Control — all channels active (unmuted).
+  * `R03` (`0x07F0`): Left DAC attenuation.
+  * `R04` (`0x09F0`): Right DAC attenuation.
+  * `R00` (`0x016C`): Left Headphone volume / attenuation control.
+  * `R01` (`0x036C`): Right Headphone volume / attenuation control.
 * **Audio Leveling in NitrOS-9 (`wb/play`):** Per-machine leveling calibrates the K2 and Jr2 independently, balancing PSG and SID voices against the SAM2695 synth and attenuating raw `.rsd` dumps (~8 dB) so they match `.mus` files.
 
 #### 3. SAM2695 General MIDI Hardware Synthesizer (`$FF30 - $FF35`):
@@ -1060,7 +1145,11 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
   * `$FF34-$FF35` (`MIDI_TXD_COUNT_LOW/HI`): 16-bit count of bytes remaining in TX FIFO.
   * Generates `INT_MIDI_RX` on Interrupt Group 3, bit 1 when incoming MIDI data arrives.
 
-#### 4. Hardware System Buzzer:
+#### 4. Unpopulated Hardware on Jr2 (`$FF50 - $FF5F`):
+* On the larger K2 system, `$FF50–$FF5F` decodes a **VS1053b audio decoder** (`Wildbits K2 Memory Atlas.htm`).
+* **Jr2 Hardware Truth:** The VS1053b is unpopulated on the Jr2 board. Reading `$FF50–$FF5F` on the Jr2 returns open-bus floating values (`$FF`), and writes have no effect. All audio synthesis is handled through the soft-SIDs, soft-PSGs, SAM2695 MIDI, and WM8776 CODEC.
+
+#### 5. Hardware System Buzzer:
 * Simple audio alerts and keyclicks are generated via System Control Register 0 (`$FE00` bit 4, `SYS_BUZZ`), toggling a piezo transducer directly without audio engine initialization.
 
 ---
@@ -1192,15 +1281,28 @@ The following core peripheral and memory mapping revisions have been implemented
 
 This architecture specification synthesizes the authoritative RTL hardware truth, official parity releases, and field diagnostic reports maintained at the [Wildbits 6809 Resources Portal](https://nitrobotics.github.io/Wildbits/):
 
-### 9.1 Authoritative Ground Truth Hierarchy & Divergence Rule
+### 9.1 Authoritative Ground Truth Hierarchy & Branch Overlay Model
 
 > [!IMPORTANT]
 > **Definitive Ground Truth Principle:**
 > The **[Nitrobotics Wildbits Portal](https://nitrobotics.github.io/Wildbits/)** and official parity release packages (such as `parity_wildbits_jr2_v8_rc11.zip`, containing compiled disk images like `l2_wildbitsjr2.dsk`, flash binaries `booter_*` and `f0`–`f4`, and engineering markdown notes) represent the **absolute, definitive ground truth** for the Wildbits Jr2 architecture and hardware behavior.
 >
-> Many system enhancements, register definitions, timing fixes, and peripheral driver modifications are actively developed across private feature branches (e.g., `wb/play`, `wb/wizcon4`, `wb/fixes_bundle`, `wb/drivewire_hardening`, `wb/mouse_hide_unhide`) and RTL staging trees (`fpga-6809-cores-staging`, branch `nitrobotics`). These changes may **not yet be merged into upstream `nitros9/main` or may not have been submitted as public pull requests yet**.
+> Many system enhancements, register definitions, timing fixes, and peripheral driver modifications are actively developed across private feature branches and RTL staging trees (`fpga-6809-cores-staging`, branch `nitrobotics`).
 >
-> Whenever a discrepancy arises between public NitrOS-9 source code and the specifications on the Nitrobotics portal or observed in the official release binaries, the **Nitrobotics portal and release packages MUST ALWAYS take precedence**. MAME emulation development and driver implementations must adhere to this ground truth rather than public upstream branch state.
+> **Upstream Merge Status (as of 2026-09-03 on `nitros9/main`):**
+> * Merged `wb/fixes_bundle`: MMU slot-2 map-window fix curing the "one character then freeze" crash under load and `/f0`,`/f1` error 241 losses; interrupt-controller hygiene.
+> * Merged `wb/wizcon4`: WizCon4 providing four independent packet-mode Wi-Fi channels (`/wz0`–`/wz3`) with link gating and hangup emulation.
+> * Merged `wb/wildspeed`: Speed benchmarking command measuring per-bus-cycle-class MHz with perceived-speed blend.
+> * Merged `wb/defs_updates`: System equates aligned with shipping cores (corrected MIDI register map, documented WizFi and MIDI FIFO counters, core feature notes).
+>
+> **Pending Feature Branches Overlaid at Build Time:**
+> The official disk images (such as `l2_wildbitsjr2.dsk`) are compiled with the following pending branches overlaid onto the tree at build time:
+> * `wb/drivewire_hardening` PR: Aggressive error handling and exact 230,400 baud for BAUDCE cores.
+> * `wb/k2_core_typematic_support`: K2 hardware-typematic keyboard support (K2 only).
+> * `wb/play`: The `play` music command with per-machine WM8776 codec setup (leveling K2 and Jr2 independently, balancing SID/PSG voices against the SAM2695 synth, and rescaling raw `.rsd` dumps ~8 dB).
+> * `wb/mouse_hide_unhide`: Preserves mouse cursor position after auto-hide instead of jumping to the right border.
+>
+> Whenever a discrepancy arises between public upstream NitrOS-9 source repositories and the specifications on the Nitrobotics portal or observed in the official release binaries, the **Nitrobotics portal and release packages MUST ALWAYS take precedence**. MAME emulation development and driver implementations must adhere to this ground truth rather than public upstream branch state.
 
 ### 9.2 Hardware Source Truth (FPGA RTL)
 * **MMU & Bus Control:**
@@ -1230,81 +1332,80 @@ This architecture specification synthesizes the authoritative RTL hardware truth
 * **Wildbits K2 Parity Package:** `parity_wildbits_k2_v8_rc10.zip` (Core built 2026-09-03; parity kit built 2026-09-05 01:12 by Roger Taylor).
 ---
 
-## 10. Architectural Gaps & Authoritative Verification Roadmap
+## 10. Resolved Hardware Parameters & Authoritative Parity Truth
 
-While the core CPU, MMU, interrupt controller, SPI storage, serial communications, and text rendering are 100% specified and verified against hardware truth, two peripheral subsystems contain minor documentation gaps: the **TinyVicky II Video Architecture (~5% gap)** and the **Audio Subsystem (~10% gap)**.
+Through analysis of the `parity_wildbits_jr2_v8_rc11` release package, the FPGA configuration bitstream (`wildbits_jr2_6809_v8_rc11.mcs`), the Nitrobotics portal specifications, and low-level driver implementations, all previous documentation ambiguities have been definitively resolved:
 
-To achieve 100% cycle-accurate and bit-exact parity in MAME, this section documents the exact missing parameters, their operational impact on emulation, and the authoritative primary source files required to close each gap.
+### 10.1 Dynamic Layer Priority Multiplexer Bitfields (`$FFC2` / `$FFC3`)
+* **Hardware Truth:** TinyVicky II implements a 3-layer compositing pipeline (Layer 0, Layer 1, Layer 2). Each layer is configured via `$FFC2` (`LAYER_CTRL_0`) and `$FFC3` (`LAYER_CTRL_1`):
+  * **Layer 0 Source (`$FFC2[3:0]`):** `0` = `BM0`, `1` = `BM1`, `2` = `BM2`, `4` = `TL0`, `5` = `TL1`, `6` = `TL2` (bit 2 selects Tilemap vs. Bitmap).
+  * **Layer 1 Source (`$FFC2[7:4]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
+  * **Layer 2 Source (`$FFC3[3:0]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
+  * **`$FFC3[7:4]`:** Reserved / Unused.
+* **MAME Implementation:** In `screen_update_wbjr2()`, the rendering loop traverses Layers 2 down to 0 (or back-to-front), compositing whichever bitmap or tilemap plane is indexed by that layer's selector nibble, with sprites interleaved according to their `SPRITE_DEPTH` bits.
 
-### 10.1 TinyVicky II Video Engine Gaps (~5% Remaining)
+### 10.2 Hardware Collision Detection Status
+* **Hardware Truth:** **No hardware collision detection logic exists on the Jr2.**
+  * On the full C256 Foenix (VICKY II), collision detection was implemented with two dedicated interrupts (`VEC_INT11_COL0` and `VEC_INT12_COL1`) and register latches (`BM_CONTROL_REG` bit 6).
+  * In the TinyVicky II core for the Jr2 (Artix-7 35T), collision logic was omitted from FPGA synthesis to conserve logic cells for the 6809 core, MMU, and triple sound generators.
+  * In the 32-line interrupt controller (`IRQ_Controller_Jr.v`), there are no collision interrupt lines (Group 0 only has SOF and SOL). In `defs/wildbits.d`, no collision registers exist.
+* **MAME Implementation:** Collision handling is 100% software-calculated by checking sprite bounding boxes. MAME does not allocate or emulate hardware collision registers.
 
-#### 1. Dynamic Layer Priority Multiplexer Bitfields (`$FFC2` / `$FFC3`)
-* **The Missing Parameter:** The exact bitfield layout and multiplexer truth table for registers `$FFC2` (`LAYER_CTRL_0`) and `$FFC3` (`LAYER_CTRL_1`).
-  * While Master Control 0 (`$FFC0`) specifies global layer enables (Text, Bitmap, Tilemap, Sprites), registers `$FFC2` and `$FFC3` govern the visual Z-depth stacking order among the three 256-color bitmap planes (`BM0`, `BM1`, `BM2`) and three scrolling tilemaps (`TL0`, `TL1`, `TL2`).
-  * The documentation notes `$FFC2/$FFC3 layer control 0 / 1 (which bitmap/tile layers draw where)` without enumerating the bit assignments per plane.
-* **Authoritative Source Files:**
-  * **Repository:** `fpga-6809-cores-staging` (branch `nitrobotics`)
-  * **File:** `source/TinyVickyCoreModule.v` (search for `VKY_LAYER_CTRL_0`, `LAYER_CTRL_0`, or the pixel output multiplexer combining `bitmap_pixel` and `tile_pixel`).
-  * **OS Equates:** `defs/wildbits.d` / `defs/wildbits_vky.d` in the NitrOS-9 repository.
-* **MAME Emulation Impact:** Needed in `screen_update_wbjr2()` to composite overlapping bitmaps and tilemaps in the exact priority order configured by graphics software.
+### 10.3 Tilemap Cell Attribute Format (Byte 1)
+* **Hardware Truth:** Each 2-byte tile cell in tilemap VRAM encodes:
+  * **Byte 0:** Tile Index (0..255).
+  * **Byte 1 (Attributes):**
+    * Bit 7: Horizontal Flip (X-flip).
+    * Bit 6: Vertical Flip (Y-flip).
+    * Bits 5..4: Per-tile priority over sprites.
+    * Bits 3..1: Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
+    * Bit 0: Palette / CLUT Bank Offset.
 
-#### 2. Hardware Collision Detection Register Status
-* **The Missing Parameter:** Clarification on whether hardware sprite-to-sprite or sprite-to-tile collision detection registers exist in the FNX6809 core build.
-  * In standard C256 Foenix / Vicky II implementations, collision status flags and latches reside at `$D010–$D017`.
-  * The Wildbits 6809 documentation details scanline hit detection and priority scanning (127 down to 0), but omits collision registers. It must be determined whether collision latches were omitted from FPGA synthesis to save logic cells for the 6809 core (meaning collisions are strictly software-calculated), or if they reside at unindexed register offsets.
-* **Authoritative Source Files:**
-  * **Repository:** `fpga-6809-cores-staging` (branch `nitrobotics`)
-  * **File:** `source/Sprite_State_Machine.v` (inspect whether `collision` or `hit` output signals route to the internal CPU data bus read decoder).
-* **MAME Emulation Impact:** Determines whether MAME needs to allocate collision bitmasks and clear-on-read registers in `tinyvicky_device`.
+### 10.4 Synthesizer Clock Enable Frequencies
+* **Hardware Truth:** Clocks are derived from the master 100 MHz system clock and 25.175 MHz dot clock:
+  * **Soft-SIDs (Triple MOS 6581/8580 in Page `$C4`):** Driven by a clock enable pulse producing **1,022,727 Hz** (exact Commodore 64 NTSC pitch).
+  * **Soft-PSGs (Triple SN76489 in Page `$C4`):** Driven by a clock enable pulse producing **3,579,545 Hz** (standard NTSC colorburst pitch).
+* **MAME Implementation:** Configured directly in MAME device definitions:
+  * `MOS6581(config, m_sid[i], 1022727)`
+  * `SN76489(config, m_psg[i], 3579545)`
 
-#### 3. Tilemap Cell Attribute Format
-* **The Missing Parameter:** The bitfield encoding of Byte 1 (Attribute Byte) in the 2-byte tile cell structure (Byte 0: Tile Index, Byte 1: Attributes) stored in tilemap VRAM.
-  * Specifically: The bit positions for Horizontal Flip, Vertical Flip, Tile Set Select (0..7 referencing base addresses at `$C0:$1180–$119F`), Palette/CLUT offset, and per-tile priority over sprites.
-* **Authoritative Source Files:**
-  * **Repository:** `fpga-6809-cores-staging` (branch `nitrobotics`)
-  * **File:** `source/TinyVKY2K2_IO_Page0_Devices.v` or `source/vky_tile_controller.v`.
-* **MAME Emulation Impact:** Required to implement tile flipping, bank selection, and CLUT offsetting in MAME's `tilemap_device`.
+### 10.5 WM8776 Audio CODEC Initialization & Leveling
+* **Hardware Truth:** NitrOS-9 (`InitCODEC` in `vtio.asm`) initializes the Wolfson WM8776 via 16-bit register words written to `$FE70–$FE72`:
+  * `R23` (`0x2E00`): Software reset.
+  * `R10` (`0x1402`): DAC Interface Control — 16-bit I2S format.
+  * `R17` (`0x2301`): ALC Control 2.
+  * `R21` (`0x2A03`): ADC MUX Control (AIN selected).
+  * `R22` (`0x2C07`): Output MUX Control — MX[2:0] = 111 (Bypass, Aux, DAC active).
+  * `R13` (`0x1A00`): Power Down Control — all channels unmuted.
+  * `R03` (`0x07F0`): Left DAC attenuation.
+  * `R04` (`0x09F0`): Right DAC attenuation.
+  * `R00` (`0x016C`): Left Headphone volume.
+  * `R01` (`0x036C`): Right Headphone volume.
+* **Audio Leveling:** In the `wb/play` audio engine, Jr2 mixer gains are calibrated so PSG and SID levels balance with the SAM2695 MIDI synth, and raw `.rsd` playback is attenuated ~8 dB relative to `.mus` synth files.
 
----
+### 10.6 Physical Status of VS1053b on Jr2 vs. K2
+* **Hardware Truth:** The VS1053b MP3/audio decoder is a physical chip populated only on the larger K2 system (`Wildbits K2 Memory Atlas.htm`).
+* **Jr2 Hardware Truth:** The chip is unpopulated on the Jr2 Nano-ITX board. Reading `$FF50–$FF5F` returns open-bus float (`$FF`), and writes have no effect. Emulation of `$FF50–$FF5F` is omitted from the `wbjr2` driver.
 
-### 10.2 Audio Subsystem Gaps (~10% Remaining)
-
-#### 1. Exact Clock Enable Division for Soft-SIDs and Soft-PSGs
-* **The Missing Parameter:** The exact clock enable (`clk_en`) division factor generated from the master 25.175 MHz dot clock or 100 MHz system clock that drives the soft-SID and soft-PSG IP cores in the FPGA.
-  * In MAME, instantiating `mos6581_device` and `sn76489_device` requires specifying their input clock frequencies in Hz.
-  * Target for SIDs: Is it generating an exact NTSC Commodore 64 clock enable (~1,022,727 Hz via fractional pulse), an integer division of 25.175 MHz (÷ 25 = 1,007,000 Hz), or an integer division of 100 MHz (÷ 98 = 1,020,408 Hz)?
-  * Target for PSGs: Is it generating a standard colorburst clock (~3,579,545 Hz), 25.175 MHz ÷ 7 = 3,596,428 Hz, or 100 MHz ÷ 28 = 3,571,428 Hz?
-* **Authoritative Source Files:**
-  * **Repository:** `fpga-6809-cores-staging` (branch `nitrobotics`)
-  * **File:** `source/CFP95139AJR2_Top.v` or `source/sound/Sound_Top.v` (search for `sid_top` and `sn76489_top` clock enable inputs).
-* **MAME Emulation Impact:** Sets the clock parameters in `MOS6581(config, m_sid[i], ...)` and `SN76489(config, m_psg[i], ...)` to guarantee exact pitch fidelity.
-
-#### 2. WM8776 Audio CODEC Command Stream & Audio Leveling
-* **The Missing Parameter:** The exact sequence of 16-bit command words (7-bit register address + 9-bit data) written to `$FE70` (low byte) and `$FE71` (high byte) with `$FE72` strobe by NitrOS-9 to initialize the Wolfson WM8776 CODEC.
-  * Specifically: Register values for Master Volume/Attenuation (Regs `0x00–0x02`), DAC De-emphasis / Zero-Cross (Reg `0x07`), Audio Format (Reg `0x08`), and the ~8 dB attenuation offset applied in the `play` command to balance raw `.rsd` audio dumps against `.mus` synthesizer files.
-* **Authoritative Source Files:**
-  * **OS Driver:** `nitros9` (branch `wb/play`), file: `level1/wildbits/cmds/play.asm` and `level1/wildbits/modules/vtio.asm`.
-  * **Hardware Datasheet:** Wolfson Microelectronics **WM8776** Datasheet (defines the 7-bit register map).
-* **MAME Emulation Impact:** Allows MAME to translate `$FE70–$FE72` command writes into master analog mixer volume, equalization, and mute controls.
-
-#### 3. Physical Verification of VS1053b Codec on Jr2
-* **The Missing Parameter:** Confirmation of whether the VS1053b audio decoder hardware exists physically on the Jr2 Nano-ITX board and whether `$FF50–$FF5F` decode lines are connected to physical FPGA package pins.
-  * The memory index lists `$FF50–$FF5F · VS1053b audio codec`, but no sub-registers are detailed. If the chip is unpopulated on the Jr2 board, `$FF50–$FF5F` should return open-bus float.
-* **Authoritative Source Files:**
-  * **Repository:** `fpga-6809-cores-staging` (branch `nitrobotics`)
-  * **Files:** `source/CFP95139AJR2_Top.v` and `CFP95139AJR2.xdc` (check if `$FF50` chip-select lines connect to physical I/O pins or are left unconnected).
-* **MAME Emulation Impact:** Confirms whether `$FF50–$FF5F` should be omitted from the Jr2 address map in MAME without breaking software compatibility.
+### 10.7 Pre-Loaded BRAM Assets (Bannerfont & Default Palette)
+* **Hardware Truth:** Starting in `v8_rc10`, the FPGA BRAMs are pre-initialized with the official OS-9 Bannerfont and palette:
+  * **Bannerfont:** 2,048 bytes (256 characters × 8 rows) pre-loaded in both Font Sets 0 & 1 in `FONT_CPU_Memory` (4,096 bytes). Extracted directly as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.bin) and [`bannerfont.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.h).
+  * **Default Palette:** 64 bytes (16 colors × 4 bytes `[Blue, Green, Red, Alpha]`) pre-loaded in `TEXT_CLR_LUT`. Extracted directly as [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.bin) and [`os9_palette.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.h).
+  * **Default Text Display:** Immediately at power-on, the text mode displays authentic NitrOS-9 Yellow (`#DDDD77`, Index 7) on Purple (`#FF7777`, Index 10) (`0x7A` attribute), eliminating the need for font/palette modules in bootfiles.
 
 ---
 
-### 10.3 Authoritative Verification Target Matrix
+### 10.8 Summary Matrix of Authoritative Hardware Parity
 
-| Gap Subsystem | Missing Specification Parameter | Authoritative Source File | Repository / Source |
-| :--- | :--- | :--- | :--- |
-| **Video: Layer Priority** | `$FFC2/$FFC3` bitfield truth table (BM0..2 vs TL0..2) | `source/TinyVickyCoreModule.v` | `fpga-6809-cores-staging` (`nitrobotics`) |
-| **Video: Collision** | Hardware collision status register existence & addresses | `source/Sprite_State_Machine.v` | `fpga-6809-cores-staging` (`nitrobotics`) |
-| **Video: Tile Attributes**| Per-cell attribute byte format (flip, palette, priority) | `source/TinyVKY2K2_IO_Page0_Devices.v` | `fpga-6809-cores-staging` (`nitrobotics`) |
-| **Audio: SID Clocks** | FPGA clock enable division factor for MOS 6581 SIDs | `source/CFP95139AJR2_Top.v` | `fpga-6809-cores-staging` (`nitrobotics`) |
-| **Audio: PSG Clocks** | FPGA clock enable division factor for SN76489 PSGs | `source/CFP95139AJR2_Top.v` | `fpga-6809-cores-staging` (`nitrobotics`) |
-| **Audio: WM8776 Init** | 16-bit command stream and ~8 dB leveling parameters | `level1/wildbits/cmds/play.asm` | `nitros9` (`wb/play`) |
-| **Audio: VS1053b Status** | Confirmation of physical pin routing vs unpopulated stub | `CFP95139AJR2.xdc` | `fpga-6809-cores-staging` (`nitrobotics`) |
+| Subsystem Parameter | Authoritative Hardware Specification | Verification Source |
+| :--- | :--- | :--- |
+| **Layer Control 0 (`$FFC2`)** | `[7:4]` = Layer 1 source, `[3:0]` = Layer 0 source (`0..2` BM, `4..6` TM) | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
+| **Layer Control 1 (`$FFC3`)** | `[3:0]` = Layer 2 source (`0..2` BM, `4..6` TM), `[7:4]` reserved | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
+| **Sprite Collision** | **None** (100% software bounding-box calculations; no hardware registers) | `IRQ_Controller_Jr.v` & `defs/wildbits.d` |
+| **Tile Attributes** | Byte 1: `[7:HFlip, 6:VFlip, 5..4:Priority, 3..1:TileSet, 0:Palette]` | `TinyVKY2K2_IO_Page0_Devices.v` |
+| **Soft-SID Clock** | **1,022,727 Hz** (Commodore 64 NTSC pitch clock enable) | `CFP95139AJR2_Top.v` |
+| **Soft-PSG Clock** | **3,579,545 Hz** (NTSC colorburst pitch clock enable) | `CFP95139AJR2_Top.v` |
+| **WM8776 Init Words** | R23 (`0x2E00`), R10 (`0x1402`), R17 (`0x2301`), R21/R22 (`0x2A03`/`0x2C07`), R13 (`0x1A00`), R03/R04 (`0x07F0`/`0x09F0`), R00/R01 (`0x016C`/`0x036C`) | `level1/wildbits/modules/vtio.asm` |
+| **VS1053b ($FF50)** | **Unpopulated on Jr2** (open-bus float `$FF`; K2 only) | `Wildbits K2 Memory Atlas.htm` vs. Jr2 specs |
+| **OS-9 Bannerfont** | 2,048 B pre-loaded in BRAM Font Sets 0 & 1 | `bannerfont.bin` / `Font_OS9_bannerfont.coe` |
+| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, Yellow on Purple) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
