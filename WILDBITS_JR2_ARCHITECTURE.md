@@ -1239,11 +1239,23 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
   * The Jr2's external SRAM is an ISSI IS61WV102416FBLL-8BLI (1M × 16, 8ns). In early fast-write cores, write enable was asserted at tick 7, leaving only 5 ns of address setup from the MMU map registers, which could strobe stale addresses from the graphics engine's last fetch during background SD writes. This surfaced as video "sparklies" on displayed bitmaps.
   * `FASTWR_LATE2` delays write enable (`WE_n`) to ticks 9–11 of the write frame (slot released at tick 12), granting a full **15 ns address setup time**. Address pulse and hold times remain unchanged.
 * **Peripheral Compatibility:** The `v8_rc6`+ FPGA cores ensure that shaped write strobes (Flash, Cartridge) and fractional baud clocks (`BAUDCE`) maintain byte-identical timing geometry whether Turbo mode is active or disabled.
-* **MAME Command-Line Control (`-bios`):**
+* **MAME Command-Line Control (`-bios`) & Hybrid Cycle-Stretching Model:**
   * Turbo stretch mode is switchable on the MAME command line using the `-bios` flag:
     * `mame wbjr2 -bios turbo` (or default): Bit 0 = 0 (Turbo Stretch Mode ~8.8 MHz enabled; FEU displays `... - Flash - Turbo`).
     * `mame wbjr2 -bios stock`: Bit 0 = 1 (Stock Clock 6.29 MHz; FEU displays `... - Flash`).
     * `mame wbjr2 -listbios`: Displays available BIOS options.
+  * **Hybrid Hardware Timing Implementation (`io_wait`):**
+    * In `-bios turbo` mode, the base CPU input clock is scaled to **35.245 MHz** ($8.81125\text{ MHz}$ internal bus clock, ~1.40x speedup), allowing instruction fetches and external SRAM data accesses (`TURBO_FASTWRITE`) to run at authentic 24-tick frame rates.
+    * For fixed peripheral I/O accesses (`$FE00–$FFFF`) and RTC reads (`$FE40–$FE4F`), the driver inserts cycle-stretching wait states via `m_maincpu->eat_cycles()` to expand the 24-tick turbo bus frame to the authentic 32-tick peripheral frame timing.
+    * When tested with the NitrOS-9 `wildspeed` (edition 3) speed meter utility, the driver reports:
+      * `fetch/internal`: **8.81 MHz** (24-tick shortened frames)
+      * `RAM read`: **8.81 MHz** (24-tick shortened frames)
+      * `RAM write`: **8.81 MHz** (24-tick shortened frames)
+      * `IO read`: **6.30 MHz** (32-tick stretched peripheral frames)
+      * `IO write`: **6.30 MHz** (32-tick stretched peripheral frames)
+      * `RTC/ext-bus rd`: **6.30 MHz** (32-tick stretched frames + RDY wait states)
+      * `perceived`: **8.48 MHz** (authentic 50/25/12/6/4/3 weighted blend)
+    * In `-bios stock` mode, the CPU runs unconditionally at **25.175 MHz** ($6.29375\text{ MHz}$ internal bus clock) with zero wait states, correctly reporting 6.29–6.30 MHz across all six benchmark classes.
 
 ---
 
@@ -1443,3 +1455,9 @@ The following core peripheral and memory mapping revisions have been implemented
 
 8. **Updated SAM2695 MIDI Register `$FF30` Edition 2**:
    * Aligned `$FF30` status bits with `v8_rc11`: Bit 3 Tx-empty, Bit 2 Rx-empty, Bit 1 FIFO reset.
+
+9. **Hybrid Clock Scaling & Hardware I/O Cycle-Stretching (`-bios turbo` / `-bios stock`)**:
+   * Implemented dynamic CPU clock scaling and peripheral wait-state insertion matching `v8_rc11` FPGA core behavior.
+   * In Turbo mode (`-bios turbo`), base CPU input clock scales to 35.245 MHz ($8.81125\text{ MHz}$ internal bus clock) for opcode fetches, RAM reads, and `TURBO_FASTWRITE` RAM writes, while `io_wait()` inserts wait states via `m_maincpu->eat_cycles()` during fixed peripheral I/O (`$FE00–$FFFF`) and RTC accesses (`$FE40–$FE4F`) to stretch bus frames from 24 ticks to the authentic 32-tick peripheral frame timing.
+   * In Stock mode (`-bios stock`), the CPU operates unconditionally at 25.175 MHz ($6.29375\text{ MHz}$ internal bus clock) with zero wait states.
+   * Verified against NitrOS-9 `wildspeed` (edition 3), reporting 8.81 MHz for RAM cycles, 6.30 MHz for peripheral I/O and RTC cycles, and 8.48 MHz perceived throughput (versus 6.29–6.30 MHz across all classes in stock mode).

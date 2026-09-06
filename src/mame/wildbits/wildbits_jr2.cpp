@@ -276,6 +276,10 @@ private:
 	void update_line_timer();
 	TIMER_CALLBACK_MEMBER(scanline_tick);
 
+	void io_wait(int cycles = 0);
+	bool m_is_turbo;
+	uint8_t m_io_wait_counter;
+
 	void update_banks();
 	uint8_t *get_physical_block_ptr(uint8_t block_num);
 
@@ -482,35 +486,58 @@ void wildbits_jr2_state::update_banks()
 	}
 }
 
+void wildbits_jr2_state::io_wait(int cycles)
+{
+	if (!m_is_turbo)
+		return;
+
+	if (cycles > 0)
+	{
+		m_maincpu->eat_cycles(cycles);
+		return;
+	}
+
+	// Default peripheral I/O access: stretch 24-tick turbo frame to 32-tick peripheral frame
+	// (averaging 2.4 CPU cycles per access: 2, 2, 3, 2, 3)
+	m_io_wait_counter = (m_io_wait_counter + 1) % 5;
+	m_maincpu->eat_cycles((m_io_wait_counter == 2 || m_io_wait_counter == 4) ? 3 : 2);
+}
+
 uint8_t wildbits_jr2_state::mmu_mem_ctrl_r()
 {
+	io_wait();
 	return m_mmu_mem_ctrl;
 }
 
 void wildbits_jr2_state::mmu_mem_ctrl_w(uint8_t data)
 {
+	io_wait();
 	m_mmu_mem_ctrl = data;
 	update_banks();
 }
 
 uint8_t wildbits_jr2_state::mmu_io_ctrl_r()
 {
+	io_wait();
 	return m_mmu_io_ctrl;
 }
 
 void wildbits_jr2_state::mmu_io_ctrl_w(uint8_t data)
 {
+	io_wait();
 	m_mmu_io_ctrl = data;
 }
 
 uint8_t wildbits_jr2_state::mmu_slot_r(offs_t offset)
 {
+	io_wait();
 	uint8_t lut = (m_mmu_mem_ctrl >> 4) & 0x03;
 	return m_mlut[lut][offset & 0x07];
 }
 
 void wildbits_jr2_state::mmu_slot_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	uint8_t lut = (m_mmu_mem_ctrl >> 4) & 0x03;
 	m_mlut[lut][offset & 0x07] = data;
 	if (lut == (m_mmu_mem_ctrl & 0x03))
@@ -521,6 +548,7 @@ void wildbits_jr2_state::mmu_slot_w(offs_t offset, uint8_t data)
 
 uint8_t wildbits_jr2_state::sys0_r()
 {
+	io_wait();
 	uint8_t val = m_sys0 & ~0xc0;
 	if (!m_sdcard->get_card_present())
 	{
@@ -531,36 +559,41 @@ uint8_t wildbits_jr2_state::sys0_r()
 
 void wildbits_jr2_state::sys0_w(uint8_t data)
 {
+	io_wait();
 	m_sys0 = data;
 	if ((data & 0x80) && (m_rst0 == 0xde) && (m_rst1 == 0xad))
 	{
-		printf("DEBUG: Software RESET via SYS0! PC=0x%04X\n", m_maincpu->pc());
 		machine().schedule_hard_reset();
 	}
 }
 
 uint8_t wildbits_jr2_state::sys1_r()
 {
+	io_wait();
 	return m_sys1;
 }
 
 void wildbits_jr2_state::sys1_w(uint8_t data)
 {
+	io_wait();
 	m_sys1 = data;
 }
 
 void wildbits_jr2_state::rst0_w(uint8_t data)
 {
+	io_wait();
 	m_rst0 = data;
 }
 
 void wildbits_jr2_state::rst1_w(uint8_t data)
 {
+	io_wait();
 	m_rst1 = data;
 }
 
 uint8_t wildbits_jr2_state::mid_r()
 {
+	io_wait();
 	return WBJR2_MACHINE_ID;
 }
 
@@ -572,6 +605,7 @@ static inline uint8_t to_bcd(uint8_t val)
 
 uint8_t wildbits_jr2_state::rtc_r(offs_t offset)
 {
+	io_wait(2);
 	system_time systime;
 	machine().current_datetime(systime);
 	switch (offset)
@@ -591,6 +625,7 @@ uint8_t wildbits_jr2_state::rtc_r(offs_t offset)
 
 void wildbits_jr2_state::rtc_w(offs_t offset, uint8_t data)
 {
+	io_wait(2);
 	if (offset == 0x0e)
 		m_rtc_ctrl = data;
 }
@@ -598,6 +633,7 @@ void wildbits_jr2_state::rtc_w(offs_t offset, uint8_t data)
 // Audio CODEC ($FE70 - $FE72: WM8776)
 uint8_t wildbits_jr2_state::codec_r(offs_t offset)
 {
+	io_wait();
 	if (offset == 2)
 		return 0x00; // Bit 0 = 0 (Ready / idle)
 	return (offset == 0) ? m_codec_lo : m_codec_hi;
@@ -605,6 +641,7 @@ uint8_t wildbits_jr2_state::codec_r(offs_t offset)
 
 void wildbits_jr2_state::codec_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	if (offset == 0) m_codec_lo = data;
 	else if (offset == 1) m_codec_hi = data;
 }
@@ -612,6 +649,7 @@ void wildbits_jr2_state::codec_w(offs_t offset, uint8_t data)
 // Hardware Configuration DIP Switches ($FF90)
 uint8_t wildbits_jr2_state::dipsw_r()
 {
+	io_wait();
 	uint8_t val = m_dipsw->read();
 	// Command-line -bios option:
 	//   "-bios turbo" (default): Bit 0 = 0 (Active-low switch ON / Turbo Stretch Mode ~1.4x enabled)
@@ -650,6 +688,7 @@ void wildbits_jr2_state::set_irq(int group, uint8_t mask)
 
 uint8_t wildbits_jr2_state::intc_r(offs_t offset)
 {
+	io_wait();
 	switch (offset >> 2)
 	{
 	case 0: return m_int_pending[offset & 3];
@@ -662,6 +701,7 @@ uint8_t wildbits_jr2_state::intc_r(offs_t offset)
 
 void wildbits_jr2_state::intc_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset >> 2)
 	{
 	case 0: // Write 1 to clear pending bit
@@ -713,6 +753,7 @@ TIMER_CALLBACK_MEMBER(wildbits_jr2_state::timer1_tick)
 
 uint8_t wildbits_jr2_state::timer_r(offs_t offset)
 {
+	io_wait();
 	uint32_t t0_current = (uint32_t)(machine().time().as_ticks(25'175'000) & 0xffffff);
 
 	switch (offset)
@@ -747,6 +788,7 @@ uint8_t wildbits_jr2_state::timer_r(offs_t offset)
 
 void wildbits_jr2_state::timer_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: // T0_CTR
@@ -804,6 +846,7 @@ void wildbits_jr2_state::queue_kbd_scancode(uint8_t scancode)
 
 uint8_t wildbits_jr2_state::ps2_r(offs_t offset)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: return m_ps2_ctrl;
@@ -836,6 +879,7 @@ uint8_t wildbits_jr2_state::ps2_r(offs_t offset)
 
 void wildbits_jr2_state::ps2_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: // PS2_CTRL
@@ -900,12 +944,14 @@ void wildbits_jr2_state::sdcard_miso_w(int state)
 
 uint8_t wildbits_jr2_state::sdc_stat_r()
 {
+	io_wait();
 	// Bit 0: CS_EN, Bit 1: SPI_CLK, Bit 7: 0 (not busy)
 	return m_sdc_stat & 0x03;
 }
 
 void wildbits_jr2_state::sdc_stat_w(uint8_t data)
 {
+	io_wait();
 	m_sdc_stat = data;
 	// Bit 0: CS_EN (1 = chip select active, 0 = inactive)
 	m_sdcard->spi_ss_w((data & 0x01) ? 1 : 0);
@@ -913,11 +959,13 @@ void wildbits_jr2_state::sdc_stat_w(uint8_t data)
 
 uint8_t wildbits_jr2_state::sdc_data_r()
 {
+	io_wait();
 	return m_sdc_data_in;
 }
 
 void wildbits_jr2_state::sdc_data_w(uint8_t data)
 {
+	io_wait();
 	m_sdc_data_out = data;
 	uint8_t in_byte = 0;
 	for (int bit = 7; bit >= 0; bit--)
@@ -960,6 +1008,7 @@ void wildbits_jr2_state::poll_uart_socket()
 
 uint8_t wildbits_jr2_state::uart_r(offs_t offset)
 {
+	io_wait();
 	poll_uart_socket();
 	switch (offset & 7)
 	{
@@ -995,6 +1044,7 @@ uint8_t wildbits_jr2_state::uart_r(offs_t offset)
 
 void wildbits_jr2_state::uart_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	poll_uart_socket();
 	switch (offset & 7)
 	{
@@ -1546,6 +1596,7 @@ void wildbits_jr2_state::process_wizfi_cmd(const std::string &cmd_raw)
 
 uint8_t wildbits_jr2_state::wizfi_r(offs_t offset)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: {
@@ -1577,6 +1628,7 @@ uint8_t wildbits_jr2_state::wizfi_r(offs_t offset)
 
 void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: {
@@ -1667,6 +1719,7 @@ void wildbits_jr2_state::wizfi_w(offs_t offset, uint8_t data)
 // Hardware Integer Math Coprocessor ($FEE0 - $FEFB)
 uint8_t wildbits_jr2_state::math_r(offs_t offset)
 {
+	io_wait();
 	switch (offset)
 	{
 	// Input registers readback ($FEE0 - $FEEF)
@@ -1743,6 +1796,7 @@ uint8_t wildbits_jr2_state::math_r(offs_t offset)
 
 void wildbits_jr2_state::math_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: m_math_mulu_a = (m_math_mulu_a & 0x00ff) | (data << 8); break;
@@ -1768,6 +1822,7 @@ void wildbits_jr2_state::math_w(offs_t offset, uint8_t data)
 // TinyVicky Master Registers ($FFC0 - $FFDF)
 uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: return m_vky_mstr_ctrl_0;
@@ -1800,6 +1855,7 @@ uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 
 void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: m_vky_mstr_ctrl_0 = data; break;
@@ -1862,6 +1918,7 @@ TIMER_CALLBACK_MEMBER(wildbits_jr2_state::scanline_tick)
 // PCB ID and TinyVicky Chip Version ($FE08 - $FE0F)
 uint8_t wildbits_jr2_state::pcbid_r(offs_t offset)
 {
+	io_wait();
 	static const uint8_t s_id_ver[8] = {
 		'B', '0',       // $FE08-$FE09: PCBID ("B0")
 		0x00, 0x00,     // $FE0A-$FE0B: Sub / Minor version
@@ -1874,6 +1931,7 @@ uint8_t wildbits_jr2_state::pcbid_r(offs_t offset)
 // Hardware Mouse Cursor ($FEA0 - $FEA8)
 uint8_t wildbits_jr2_state::mouse_r(offs_t offset)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: return m_mouse_men;
@@ -1891,6 +1949,7 @@ uint8_t wildbits_jr2_state::mouse_r(offs_t offset)
 
 void wildbits_jr2_state::mouse_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00: m_mouse_men = data; break;
@@ -1908,6 +1967,7 @@ void wildbits_jr2_state::mouse_w(offs_t offset, uint8_t data)
 // SAM2695 MIDI Synth ($FF30 - $FF35)
 uint8_t wildbits_jr2_state::sam2695_r(offs_t offset)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00:
@@ -1928,6 +1988,7 @@ uint8_t wildbits_jr2_state::sam2695_r(offs_t offset)
 
 void wildbits_jr2_state::sam2695_w(offs_t offset, uint8_t data)
 {
+	io_wait();
 	switch (offset)
 	{
 	case 0x00:
@@ -2282,13 +2343,28 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_math_divu_num));
 	save_item(NAME(m_math_add_a));
 	save_item(NAME(m_math_add_b));
+	save_item(NAME(m_is_turbo));
+	save_item(NAME(m_io_wait_counter));
+
+	m_is_turbo = false;
+	m_io_wait_counter = 0;
 
 	m_scanline_timer = timer_alloc(FUNC(wildbits_jr2_state::scanline_tick), this);
 }
 
 void wildbits_jr2_state::machine_reset()
 {
-	printf("DEBUG: machine_reset() executed\n");
+	if (system_bios() == 2)
+	{
+		m_maincpu->set_unscaled_clock(XTAL(25'175'000)); // Stock 6.29 MHz
+		m_is_turbo = false;
+	}
+	else
+	{
+		m_maincpu->set_unscaled_clock(35'245'000); // Turbo 1.4x (~8.81 MHz)
+		m_is_turbo = true;
+	}
+	m_io_wait_counter = 0;
 	// Default power-on Boot-from-Flash LUT configuration:
 	// Slots 0..6 map to RAM blocks 0x00..0x06
 	// Slot 7 maps to Flash block 0x7F (which contains reset vector $FFFE)
