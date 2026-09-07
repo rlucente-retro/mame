@@ -2216,28 +2216,32 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 	}
 
 	// Render TinyVicky hardware mouse cursor if enabled via $FEA0 bit 0
-		if (m_mouse_men & 0x01)
+	if (m_mouse_men & 0x01)
+	{
+		for (int cy = 0; cy < 16; cy++)
 		{
-			for (int cy = 0; cy < 16; cy++)
+			int py = m_mouse_y + cy;
+			if (py < cliprect.min_y || py > cliprect.max_y)
+				continue;
+			uint32_t *dest = &bitmap.pix(py, 0);
+			for (int cx = 0; cx < 16; cx++)
 			{
-				int py = m_mouse_y + cy;
-				if (py < cliprect.min_y || py > cliprect.max_y)
-					continue;
-				uint32_t *dest = &bitmap.pix(py, 0);
-				for (int cx = 0; cx < 16; cx++)
+				int px = m_mouse_x + cx;
+				if (px >= cliprect.min_x && px <= cliprect.max_x)
 				{
-					int px = m_mouse_x + cx;
-					if (px >= cliprect.min_x && px <= cliprect.max_x)
+					uint8_t pix = m_vram_c0[0x0c00 + cy * 16 + cx];
+					if (pix == 255)
 					{
-						uint8_t pix = m_vram_c0[0x0400 + cy * 16 + cx];
-						if (pix != 0)
-						{
-							dest[px] = rgb_t(pix, pix, pix);
-						}
+						dest[px] = rgb_t(0xff, 0xff, 0xff); // White border
+					}
+					else if (pix != 0)
+					{
+						dest[px] = (pix == 1) ? rgb_t(0x00, 0x00, 0x00) : rgb_t(pix, pix, pix);
 					}
 				}
 			}
 		}
+	}
 
 		// Border rendering
 	if (m_vky_brdr_ctrl & 0x01)

@@ -138,8 +138,10 @@ The 21-bit physical address bus maps the following resources:
 
 #### Dedicated Sectored I/O Blocks (`$C0–$C4`):
 * **Block `$C0` (`0x180000`):** `GAMMA_BLK` / `TEXT_LUT_BLK` / `BITMAP_BLK` / `SPRITE_BLK` — Relocatable TinyVicky register block:
-  * `$0000 - $02FF`: Gamma correction lookup tables (Blue `$0000`, Green `$0100`, Red `$0200`).
-  * `$0400 - $05FF`: Hardware grayscale mouse cursor bitmap (16 × 16).
+  * `$0000 - $00FF`: Gamma Blue lookup table (256 bytes).
+  * `$0400 - $04FF`: Gamma Green lookup table (256 bytes).
+  * `$0800 - $08FF`: Gamma Red lookup table (256 bytes).
+  * `$0C00 - $0CFF`: Hardware mouse cursor sprite bitmap (16 × 16, 256 bytes; `0` = transparent, `1` = black interior, `255` = white border).
   * `$1000 - $1013`: Bitmap plane control registers & 24-bit physical start addresses (`BM0`, `BM1`, `BM2`).
   * `$1100 - $119F`: Tilemap plane registers (`TL0`, `TL1`, `TL2`) and 8 tile set base address registers (`$1180–$119F`).
   * `$1300 - $16FF`: **128 Hardware Sprite Attribute Records** (8 bytes each, Big-Endian).
