@@ -22,6 +22,7 @@
 
 // MAME headers
 #include "emu.h"
+#include "input.h"
 #include "osdepend.h"
 #include "ui/uimain.h"
 #include "uiinput.h"
@@ -41,7 +42,18 @@ void mac_osd_interface::release_keys()
 
 bool mac_osd_interface::should_hide_mouse()
 {
-	return false;
+	if (machine().paused())
+		return false;
+
+	if (machine().ui().is_menu_active())
+		return false;
+
+	bool const mouse_enabled = options().mouse() || machine().input().class_enabled(DEVICE_CLASS_MOUSE);
+	bool const lightgun_enabled = options().lightgun() || machine().input().class_enabled(DEVICE_CLASS_LIGHTGUN);
+	if (!mouse_enabled && !lightgun_enabled)
+		return false;
+
+	return true;
 }
 
 void mac_osd_interface::process_events_buf()

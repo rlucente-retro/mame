@@ -12,6 +12,7 @@
 
 // TODO: reduce dependence on concrete emu classes
 #include "emu.h"
+#include "input.h"
 #include "main.h"
 #include "render.h"
 #include "uiinput.h"
@@ -453,8 +454,13 @@ bool sdl_osd_interface::should_hide_mouse()
 	if (machine().paused())
 		return false;
 
+	if (machine().ui().is_menu_active())
+		return false;
+
 	// if neither mice nor lightguns are enabled in the core, then no
-	if (!options().mouse() && !options().lightgun())
+	bool const mouse_enabled = options().mouse() || machine().input().class_enabled(DEVICE_CLASS_MOUSE);
+	bool const lightgun_enabled = options().lightgun() || machine().input().class_enabled(DEVICE_CLASS_LIGHTGUN);
+	if (!mouse_enabled && !lightgun_enabled)
 		return false;
 
 	if (!mouse_over_window())
