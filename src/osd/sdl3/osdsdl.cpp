@@ -468,6 +468,9 @@ void sdl_osd_interface::release_keys()
 
 bool sdl_osd_interface::should_hide_mouse()
 {
+	if (!has_focus())
+		return false;
+
 	// if we are paused, no
 	if (machine().paused())
 		return false;
