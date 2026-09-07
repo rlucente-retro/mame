@@ -1463,3 +1463,10 @@ The following core peripheral and memory mapping revisions have been implemented
    * In Turbo mode (`-bios turbo`), base CPU input clock scales to 35.245 MHz ($8.81125\text{ MHz}$ internal bus clock) for opcode fetches, RAM reads, and `TURBO_FASTWRITE` RAM writes, while `io_wait()` inserts wait states via `m_maincpu->eat_cycles()` during fixed peripheral I/O (`$FE00–$FFFF`) and RTC accesses (`$FE40–$FE4F`) to stretch bus frames from 24 ticks to the authentic 32-tick peripheral frame timing.
    * In Stock mode (`-bios stock`), the CPU operates unconditionally at 25.175 MHz ($6.29375\text{ MHz}$ internal bus clock) with zero wait states.
    * Verified against NitrOS-9 `wildspeed` (edition 3), reporting 8.81 MHz for RAM cycles, 6.30 MHz for peripheral I/O and RTC cycles, and 8.48 MHz perceived throughput (versus 6.29–6.30 MHz across all classes in stock mode).
+
+10. **Interactive PS/2 Mouse Input & Interrupt Integration**:
+   * Added MAME relative mouse input ports (`IPT_MOUSE_X`, `IPT_MOUSE_Y`, `IPT_BUTTON1`/`2`/`3` under `:MOUSEX`, `:MOUSEY`, `:MOUSE_BUTTONS`).
+   * Added `poll_mouse()` sampled at 60 Hz in `vblank_w()`, translating host relative movements and button state changes into standard 3-byte PS/2 stream packets (`[status/flags, dx, dy]`) pushed to `m_mouse_fifo`.
+   * Asserted `INT_PS2_MOUSE` (`Group 0, bit 3`) via `set_irq(0, 0x08)` on packet delivery, invoking NitrOS-9's `mousedrv_ps2` interrupt handler (`IRQMSvc`).
+   * NitrOS-9's driver consumes packets, updates hardware cursor registers `$FEA2-$FEA5` (`MS_XH`/`MS_XL`, `MS_YH`/`MS_YL`), resets the `vtio.asm` inactivity auto-hide timer (`V.MSTimer`), and keeps cursor visibility active (`MS_MEN = $01`).
+   * Verified: Cursor tracks host mouse movement smoothly, auto-hides after ~4 seconds of inactivity, and immediately wakes up and tracks coordinates upon subsequent host movement.

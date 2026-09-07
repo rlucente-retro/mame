@@ -174,6 +174,12 @@ public:
 		, m_bank(*this, "bank%u", 0U)
 		, m_io_key(*this, "KEY%u", 0U)
 		, m_dipsw(*this, "DIPSW")
+		, m_mouse_x_axis(*this, "MOUSEX")
+		, m_mouse_y_axis(*this, "MOUSEY")
+		, m_mouse_btn(*this, "MOUSE_BUTTONS")
+		, m_last_mouse_x(0)
+		, m_last_mouse_y(0)
+		, m_last_mouse_btn(0)
 		, m_frame_count(0)
 	{ }
 
@@ -188,6 +194,7 @@ private:
 	void wbjr2_mem(address_map &map) ATTR_COLD;
 	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void poll_keyboard();
+	void poll_mouse();
 
 	// MMU handlers
 	uint8_t mmu_mem_ctrl_r();
@@ -421,10 +428,16 @@ private:
 	uint16_t m_vky_line_cmp;
 	emu_timer *m_scanline_timer;
 
-	// Keyboard & DIP Switch Input Ports
+	// Keyboard, DIP Switch & Mouse Input Ports
 	required_ioport_array<4> m_io_key;
 	required_ioport m_dipsw;
+	required_ioport m_mouse_x_axis;
+	required_ioport m_mouse_y_axis;
+	required_ioport m_mouse_btn;
 	uint16_t m_key_state[4];
+	int16_t m_last_mouse_x;
+	int16_t m_last_mouse_y;
+	uint8_t m_last_mouse_btn;
 	uint32_t m_frame_count;
 };
 
@@ -2349,6 +2362,9 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_math_add_b));
 	save_item(NAME(m_is_turbo));
 	save_item(NAME(m_io_wait_counter));
+	save_item(NAME(m_last_mouse_x));
+	save_item(NAME(m_last_mouse_y));
+	save_item(NAME(m_last_mouse_btn));
 
 	m_is_turbo = false;
 	m_io_wait_counter = 0;
@@ -2432,6 +2448,9 @@ void wildbits_jr2_state::machine_reset()
 	while (!m_mouse_fifo.empty()) m_mouse_fifo.pop();
 	for (int i = 0; i < 4; i++)
 		m_key_state[i] = 0;
+	m_last_mouse_x = m_mouse_x_axis->read();
+	m_last_mouse_y = m_mouse_y_axis->read();
+	m_last_mouse_btn = m_mouse_btn->read() & 0x07;
 	m_frame_count = 0;
 
 	// Reset SDC Controller
@@ -2672,12 +2691,50 @@ void wildbits_jr2_state::poll_keyboard()
 	}
 }
 
+void wildbits_jr2_state::poll_mouse()
+{
+	int16_t cur_x = m_mouse_x_axis->read();
+	int16_t cur_y = m_mouse_y_axis->read();
+	uint8_t cur_btn = m_mouse_btn->read() & 0x07;
+
+	int16_t dx = cur_x - m_last_mouse_x;
+	int16_t dy = m_last_mouse_y - cur_y; // PS/2 standard: +Y is upward, -Y is downward
+
+	if (dx != 0 || dy != 0 || cur_btn != m_last_mouse_btn)
+	{
+		m_last_mouse_x = cur_x;
+		m_last_mouse_y = cur_y;
+		m_last_mouse_btn = cur_btn;
+
+		if (m_mouse_fifo.size() <= 12)
+		{
+			if (dx < -255) dx = -255;
+			if (dx > 255) dx = 255;
+			if (dy < -255) dy = -255;
+			if (dy > 255) dy = 255;
+
+			uint8_t b0 = 0x08 | (cur_btn & 0x07);
+			if (dx < 0) b0 |= 0x10;
+			if (dy < 0) b0 |= 0x20;
+
+			uint8_t b1 = uint8_t(dx & 0xff);
+			uint8_t b2 = uint8_t(dy & 0xff);
+
+			m_mouse_fifo.push(b0);
+			m_mouse_fifo.push(b1);
+			m_mouse_fifo.push(b2);
+			set_irq(0, 0x08); // INT_PS2_MOUSE (Bit 3 of Group 0)
+		}
+	}
+}
+
 void wildbits_jr2_state::vblank_w(int state)
 {
 	if (state)
 	{
 		m_frame_count++;
 		poll_keyboard();
+		poll_mouse();
 		set_irq(0, 0x01); // INT_VKY_SOF (Start of Frame / VSYNC 60Hz tick)
 	}
 }
@@ -2773,6 +2830,17 @@ static INPUT_PORTS_START( wbjr2 )
 	PORT_DIPNAME( 0x01, 0x00, "Turbo Stretch Mode (~1.4x)" )
 	PORT_DIPSETTING(    0x01, DEF_STR( Off ) )
 	PORT_DIPSETTING(    0x00, DEF_STR( On ) )
+
+	PORT_START("MOUSEX")
+	PORT_BIT( 0xffff, 0x0000, IPT_MOUSE_X ) PORT_SENSITIVITY(100) PORT_KEYDELTA(0) PORT_PLAYER(1)
+
+	PORT_START("MOUSEY")
+	PORT_BIT( 0xffff, 0x0000, IPT_MOUSE_Y ) PORT_SENSITIVITY(100) PORT_KEYDELTA(0) PORT_PLAYER(1)
+
+	PORT_START("MOUSE_BUTTONS")
+	PORT_BIT( 0x01, IP_ACTIVE_HIGH, IPT_BUTTON1 ) PORT_NAME("Left Button") PORT_CODE(MOUSECODE_BUTTON1)
+	PORT_BIT( 0x02, IP_ACTIVE_HIGH, IPT_BUTTON2 ) PORT_NAME("Right Button") PORT_CODE(MOUSECODE_BUTTON2)
+	PORT_BIT( 0x04, IP_ACTIVE_HIGH, IPT_BUTTON3 ) PORT_NAME("Middle Button") PORT_CODE(MOUSECODE_BUTTON3)
 INPUT_PORTS_END
 
 ROM_START(wbjr2)
