@@ -2140,6 +2140,7 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 	bool text_overlay = (m_vky_mstr_ctrl_0 & 0x02) != 0;
 	bool graph_en = (m_vky_mstr_ctrl_0 & 0x04) != 0;
 	bool bitmap_en = (m_vky_mstr_ctrl_0 & 0x08) != 0;
+	bool sprite_en = graph_en && ((m_vky_mstr_ctrl_0 & 0x20) != 0);
 	bool gamma_en = (m_vky_mstr_ctrl_0 & 0x40) != 0;
 
 	bool clk_70 = (m_vky_mstr_ctrl_1 & 0x01) != 0;
@@ -2150,77 +2151,145 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 	rgb_t bg_clear(m_vky_bg_r, m_vky_bg_g, m_vky_bg_b);
 	bitmap.fill(bg_clear, cliprect);
 
-	// Render TinyVicky 256-color Bitmap planes (BM0, BM1, BM2)
-	if (graph_en && bitmap_en)
-	{
-		// Determine layer composite order (Layer 0 = back, Layer 1 = middle, Layer 2 = front)
-		int layer_planes[3];
-		layer_planes[0] = m_vky_layer_ctrl_0 & 0x0f;
-		layer_planes[1] = (m_vky_layer_ctrl_0 >> 4) & 0x0f;
-		layer_planes[2] = m_vky_layer_ctrl_1 & 0x0f;
+	int bm_w = 320;
+	int bm_h = clk_70 ? 200 : 240;
 
-		std::vector<int> planes_to_render;
-		if (m_vky_layer_ctrl_0 != 0 || m_vky_layer_ctrl_1 != 0)
-		{
-			for (int i = 0; i < 3; i++)
-			{
-				if (layer_planes[i] <= 2 && std::find(planes_to_render.begin(), planes_to_render.end(), layer_planes[i]) == planes_to_render.end())
-				{
-					planes_to_render.push_back(layer_planes[i]);
-				}
-			}
-			for (int p = 0; p < 3; p++)
-			{
-				uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
-				if ((ctrl & 0x01) && std::find(planes_to_render.begin(), planes_to_render.end(), p) == planes_to_render.end())
-				{
-					planes_to_render.push_back(p);
-				}
-			}
-		}
-		else
-		{
-			for (int p = 0; p < 3; p++)
-			{
-				uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
-				if (ctrl & 0x01)
-					planes_to_render.push_back(p);
-			}
-		}
+	// Lambda to render a single 256-color Bitmap plane (0..2)
+	auto render_bitmap_plane = [&](int p) {
+		uint16_t reg_base = 0x1000 + p * 8;
+		uint8_t bm_ctrl = m_vram_c0[reg_base + 0];
+		if (!(bm_ctrl & 0x01))
+			return;
 
-		int bm_w = 320;
-		int bm_h = clk_70 ? 200 : 240;
+		uint8_t clut_idx = (bm_ctrl >> 1) & 0x03;
+		uint16_t clut_base = 0x1000 + clut_idx * 0x0400;
 
-		for (int p : planes_to_render)
+		uint32_t start_addr = ((uint32_t)m_vram_c0[reg_base + 1] << 16) |
+		                      ((uint32_t)m_vram_c0[reg_base + 2] << 8) |
+		                      m_vram_c0[reg_base + 3];
+
+		for (int by = 0; by < bm_h; by++)
 		{
-			uint16_t reg_base = 0x1000 + p * 8;
-			uint8_t bm_ctrl = m_vram_c0[reg_base + 0];
-			if (!(bm_ctrl & 0x01))
+			int sy0 = by * 2;
+			int sy1 = by * 2 + 1;
+			if (sy0 > cliprect.max_y || sy1 < cliprect.min_y)
 				continue;
 
-			uint8_t clut_idx = (bm_ctrl >> 1) & 0x03;
+			uint32_t row_addr = start_addr + by * bm_w;
+			if (row_addr >= 0x080000)
+				continue;
+
+			const uint8_t *src_row = &m_ram[row_addr];
+
+			for (int bx = 0; bx < bm_w; bx++)
+			{
+				uint8_t color_idx = src_row[bx];
+				if (color_idx == 0)
+					continue; // Transparent pixel
+
+				uint16_t entry_offset = clut_base + color_idx * 4;
+				uint8_t b = m_vram_c1[entry_offset + 0];
+				uint8_t g = m_vram_c1[entry_offset + 1];
+				uint8_t r = m_vram_c1[entry_offset + 2];
+
+				if (gamma_en)
+				{
+					b = m_vram_c0[0x0000 + b];
+					g = m_vram_c0[0x0400 + g];
+					r = m_vram_c0[0x0800 + r];
+				}
+
+				rgb_t pen(r, g, b);
+
+				int sx0 = bx * 2;
+				int sx1 = bx * 2 + 1;
+
+				if (sy0 >= cliprect.min_y && sy0 <= cliprect.max_y)
+				{
+					if (sx0 >= cliprect.min_x && sx0 <= cliprect.max_x)
+						bitmap.pix(sy0, sx0) = pen;
+					if (sx1 >= cliprect.min_x && sx1 <= cliprect.max_x)
+						bitmap.pix(sy0, sx1) = pen;
+				}
+				if (sy1 >= cliprect.min_y && sy1 <= cliprect.max_y)
+				{
+					if (sx0 >= cliprect.min_x && sx0 <= cliprect.max_x)
+						bitmap.pix(sy1, sx0) = pen;
+					if (sx1 >= cliprect.min_x && sx1 <= cliprect.max_x)
+						bitmap.pix(sy1, sx1) = pen;
+				}
+			}
+		}
+	};
+
+	// Lambda to render TinyVicky 128 hardware sprites for a specific depth level
+	// Depth: 0 = Total front, 1 = Between L0 and L1, 2 = Between L1 and L2, 3 = Total back
+	// Priority: Sprites evaluated 127 down to 0; sprite 0 rendered last, winning overlaps.
+	auto render_sprites = [&](int target_depth) {
+		if (!sprite_en)
+			return;
+
+		for (int s = 127; s >= 0; s--)
+		{
+			uint16_t rec_base = 0x1300 + s * 8;
+			uint8_t ctrl = m_vram_c0[rec_base + 0];
+			if (!(ctrl & 0x01)) // Sprite disabled
+				continue;
+
+			int depth = (ctrl >> 3) & 0x03;
+			if (depth != target_depth)
+				continue;
+
+			uint8_t clut_idx = (ctrl >> 1) & 0x03;
 			uint16_t clut_base = 0x1000 + clut_idx * 0x0400;
 
-			uint32_t start_addr = ((uint32_t)m_vram_c0[reg_base + 1] << 16) |
-			                      ((uint32_t)m_vram_c0[reg_base + 2] << 8) |
-			                      m_vram_c0[reg_base + 3];
-
-			for (int by = 0; by < bm_h; by++)
+			int spr_w = 32, spr_h = 32;
+			switch ((ctrl >> 5) & 0x03)
 			{
+			case 0: spr_w = 32; spr_h = 32; break; // 32x32
+			case 1: spr_w = 24; spr_h = 24; break; // 24x24
+			case 2: spr_w = 16; spr_h = 16; break; // 16x16
+			case 3: spr_w =  8; spr_h =  8; break; // 8x8
+			}
+
+			uint32_t start_addr = ((uint32_t)m_vram_c0[rec_base + 1] << 16) |
+			                      ((uint32_t)m_vram_c0[rec_base + 2] << 8) |
+			                      m_vram_c0[rec_base + 3];
+
+			int16_t spr_x = (int16_t)(((uint16_t)m_vram_c0[rec_base + 4] << 8) | m_vram_c0[rec_base + 5]);
+			int16_t spr_y = (int16_t)(((uint16_t)m_vram_c0[rec_base + 6] << 8) | m_vram_c0[rec_base + 7]);
+
+			// 32-pixel off-screen coordinate margin
+			int vis_x = spr_x - 32;
+			int vis_y = spr_y - 32;
+
+			if (vis_x + spr_w <= 0 || vis_x >= bm_w || vis_y + spr_h <= 0 || vis_y >= bm_h)
+				continue;
+
+			for (int sy = 0; sy < spr_h; sy++)
+			{
+				int by = vis_y + sy;
+				if (by < 0 || by >= bm_h)
+					continue;
+
 				int sy0 = by * 2;
 				int sy1 = by * 2 + 1;
 				if (sy0 > cliprect.max_y || sy1 < cliprect.min_y)
 					continue;
 
-				uint32_t row_addr = start_addr + by * bm_w;
+				uint32_t row_addr = start_addr + sy * spr_w;
 				if (row_addr >= 0x080000)
 					continue;
 
 				const uint8_t *src_row = &m_ram[row_addr];
 
-				for (int bx = 0; bx < bm_w; bx++)
+				for (int sx = 0; sx < spr_w; sx++)
 				{
-					uint8_t color_idx = src_row[bx];
+					int bx = vis_x + sx;
+					if (bx < 0 || bx >= bm_w)
+						continue;
+
+					uint8_t color_idx = src_row[sx];
 					if (color_idx == 0)
 						continue; // Transparent pixel
 
@@ -2258,6 +2327,66 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				}
 			}
 		}
+	};
+
+	// Render background sprites (depth 3 = total back)
+	render_sprites(3);
+
+	// Render TinyVicky Graphics Layers (Bitmaps & Sprites)
+	if (graph_en && bitmap_en)
+	{
+		// Determine layer composite order (Layer 0 = back, Layer 1 = middle, Layer 2 = front)
+		int layer_planes[3];
+		layer_planes[0] = m_vky_layer_ctrl_0 & 0x0f;
+		layer_planes[1] = (m_vky_layer_ctrl_0 >> 4) & 0x0f;
+		layer_planes[2] = m_vky_layer_ctrl_1 & 0x0f;
+
+		std::vector<int> planes_to_render;
+		if (m_vky_layer_ctrl_0 != 0 || m_vky_layer_ctrl_1 != 0)
+		{
+			for (int i = 0; i < 3; i++)
+			{
+				if (layer_planes[i] <= 2 && std::find(planes_to_render.begin(), planes_to_render.end(), layer_planes[i]) == planes_to_render.end())
+				{
+					planes_to_render.push_back(layer_planes[i]);
+				}
+			}
+			for (int p = 0; p < 3; p++)
+			{
+				uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
+				if ((ctrl & 0x01) && std::find(planes_to_render.begin(), planes_to_render.end(), p) == planes_to_render.end())
+				{
+					planes_to_render.push_back(p);
+				}
+			}
+		}
+		else
+		{
+			for (int p = 0; p < 3; p++)
+			{
+				uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
+				if (ctrl & 0x01)
+					planes_to_render.push_back(p);
+			}
+		}
+
+		if (planes_to_render.size() > 0)
+			render_bitmap_plane(planes_to_render[0]);
+		render_sprites(1); // Between Layer 0 and 1
+
+		if (planes_to_render.size() > 1)
+			render_bitmap_plane(planes_to_render[1]);
+		render_sprites(2); // Between Layer 1 and 2
+
+		if (planes_to_render.size() > 2)
+			render_bitmap_plane(planes_to_render[2]);
+		render_sprites(0); // Total front
+	}
+	else
+	{
+		render_sprites(1);
+		render_sprites(2);
+		render_sprites(0);
 	}
 
 	// Render Text Mode

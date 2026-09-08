@@ -1491,7 +1491,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **WDC 65C22 VIA 0** | VIA 0 at `$FEB0-$FEBF` driving Atari DE-9 joystick ports | *Planned* | Unmapped. |
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) in Page `$C0` at `$1000-$1013`, CLUT0–3 in Page `$C1`, layer compositing, Text Overlay | **Completed & Verified** | Verified 256-color linear row fetching, 2×2 upscaling (320×240 to 640×480), CLUT 0..3 color lookups (color index 0 transparent), `VKY_LAYER_CTRL_0/1` layer priority resolution, Text Overlay mode (`Mstr_Ctrl_Text_Overlay`, `$FFC0` bit 1), and Gamma correction. Verified with NitrOS-9 `shellbg` (loads 76KB 320×240 pixmap to BM2, CLUT2, Layer 2), `shellbgoff`, `gfxstatus`, and `drawtest` (interactive mouse drawing on BM0, CLUT0, Layer 0). |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling in Page `$C0` at `$1100-$1123` | *Planned* | Not yet rendered in `screen_update`. |
-| **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF` | *Planned* | Not yet rendered in `screen_update`. Test suites available: `sprtest128` (128-sprite testing) and `sprtest2` (Edition 2 big-endian). |
+| **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF`, CLUT 0..3 selection, 4-level layer depth interleaving | **Completed & Verified** | Verified 128 sprite records (8 bytes each, big-endian), variable dimensions (8×8, 16×16, 24×24, 32×32), 32-pixel off-screen coordinate margin, Graphics CLUT 0..3 palette lookups (color index 0 transparent), priority ordering (127 down to 0; sprite 0 on top), and 4-level sprite interleaving depth (`SPRITE_DEPTH` 0..3) across graphics layers. Verified with NitrOS-9 `sprtest2` (two 16×16 bouncing sprites with LUT0 ramp). |
 | **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* | `$FEC0` is unmapped. |
 | **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* (Revisit for Implementation) | MAME currently runs with `MACHINE_NO_SOUND_HW`. Revisit requirements updated for `v8_rc12`: VS1053b clocked at 12.288 MHz, fixed offset decode, dual SPI rate, 2KB FIFO at `$FF57`; WM8776 `InitCODEC` R21=`$1F` analog input muxing. |
 
@@ -1572,6 +1572,17 @@ The following core peripheral and memory mapping revisions have been implemented
       * `shellbgoff`: Reverts `$FFC0` to text-only mode (`$01`) and frees BM2 framebuffer via `SS.FScrn`.
       * `gfxstatus`: Confirms register state transitions (`BM02 Enabled`, `CLUT 02`, `FFC0: 0F BM GRF OVRLY TXT`, `FFC3: 02 2=BM0`).
       * `drawtest`: Interactive mouse drawing on BM0 (`$1000`), CLUT 0 (`$1000` in Page `$C1`), and Layer 0 (`$FFC2 = $00`). Clears canvas with 'c' and cleanly returns to text console on 'q'.
+
+15. **TinyVicky 128 Hardware Sprites (`SP0–SP127`) & Interleaving Depth**:
+    * Implemented 128 hardware sprite compositing in `screen_update()`:
+      * 128 attribute records in Page `$C0` (`$1300–$16FF`), decoded as 8 bytes each with big-endian coordinates and 24-bit physical RAM addresses (`SPR_ADDY_H/M/L`).
+      * Variable sprite dimensions decoded from `CTRL[6:5]`: 32×32 (`00`), 24×24 (`01`), 16×16 (`10`), and 8×8 (`11`).
+      * 32-pixel off-screen coordinate border margin (`vis_x = spr_x - 32`, `vis_y = spr_y - 32`), allowing smooth off-screen scrolling across all display edges.
+      * 256-color pixel data fetched row-major at 1 byte per pixel from system SRAM and upscaled 2×2 to match the 640×480 screen raster.
+      * Graphics CLUT 0..3 selection via `CTRL[2:1]`, with pixel index 0 treated as transparent and optional Gamma correction LUT lookup.
+      * Hardware scan priority: evaluated from sprite 127 down to 0, ensuring sprite 0 displays on top of all higher-numbered sprites during overlaps.
+      * 4-level sprite interleaving depth (`SPRITE_DEPTH` in `CTRL[4:3]`): slots sprites into the graphics compositing pipeline at Depth 3 (total back), Depth 1 (between Layer 0 and 1), Depth 2 (between Layer 1 and 2), and Depth 0 (total front, over all bitmap/tilemap planes).
+    * Verified with NitrOS-9 `sprtest2` (two 16×16 solid sprites bouncing inside visible bounds against text overlay and graphics LUT0 color ramp).
 
 ---
 
