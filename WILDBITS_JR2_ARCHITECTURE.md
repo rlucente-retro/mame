@@ -4,7 +4,7 @@
 
 ## 1. Overview & System Specifications
 
-The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a modern retrocomputing platform powered by an FPGA-centric architecture on a compact Pico-ITX motherboard (100mm × 70mm). When loaded with the **FNX6809** firmware core (authoritative hardware baseline: **`wildbits_jr2_6809_v8_rc11`**, built 2026-09-05), the system pairs a Motorola 6809 CPU core with the **TinyVicky II** graphics engine, a hardware Memory Management Unit (MMU), integrated audio synthesizers, high-speed DMA, an integer math coprocessor, and rich peripheral interfaces.
+The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a modern retrocomputing platform powered by an FPGA-centric architecture on a compact Pico-ITX motherboard (100mm × 70mm). When loaded with the **FNX6809** firmware core (authoritative hardware baseline: **`wildbits_jr2_6809_v8_rc12`**, built 2026-09-06 12:33; parity kit built 2026-09-07 23:16), the system pairs a Motorola 6809 CPU core with the **TinyVicky II** graphics engine, a hardware Memory Management Unit (MMU), integrated audio synthesizers, high-speed DMA, an integer math coprocessor, and rich peripheral interfaces.
 
 ```
 +----------------------------------------------------------------------------------------+
@@ -21,7 +21,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
 |  - 4x Graphics CLUTs + 2x Text CLUTs               - PS/2 Keyboard & Mouse Ports       |
 |  - Hardware Grayscale Mouse Cursor                 - bq4802 Real-Time Clock (RTC)      |
 |  - Line Interrupts & Counters (SOL/SOF)            - WDC 65C22 VIA / Joysticks         |
-|                                                    - VS1053b MP3 Decoder (24.576 MHz)  |
+|                                                    - VS1053b MP3 Decoder (12.288 MHz)  |
 |                                                    - Onboard 8-Position DIP Switches   |
 +----------------------------------------------------------------------------------------+
 ```
@@ -29,13 +29,13 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
 ### Key Specifications
 * **CPU:** Motorola 6809 soft core (FNX6809, Big Endian) running inside an onboard FPGA (**Xilinx Artix-7 35T**, `xc7a35tcsg324`), clocked at **6.29 MHz** (1/4th of the 25.175 MHz video dot clock oscillator; configured in MAME via `XTAL(25'175'000)` with internal ÷ 4). Optional DIP-switchable turbo stretch mode runs at **~1.4x speed (~8.8–9.0 MHz)** utilizing 24-tick shortened instruction fetch cycles (`TURBO_FASTWRITE`).
 * **SRAM Bus Geometry (`FASTWR_LATE2`):** To accommodate the Jr2's external ISSI IS61WV102416FBLL-8BLI (1M × 16, 8ns) high-speed asynchronous SRAM (512 KB mapped into Blocks `$00–$3F`), write enable (`WE_n`) is delayed to ticks 9–11 of the 32-tick write frame (released at tick 12). This grants a full **15 ns address setup time**, eliminating display artifacts ("sparklies") during simultaneous background SD transfers and foreground bitmap compositing under turbo.
-* **FPGA Configuration Memory:** 16 MB Micron MT25QL128 Quad-SPI Flash memory (`write_cfgmem -format mcs -size 16 -interface SPIx4`), programmed via [`wildbits_jr2_6809_v8_rc11.mcs`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/wildbits_jr2_6809_v8_rc11.mcs).
+* **FPGA Configuration Memory:** 16 MB Micron MT25QL128 Quad-SPI Flash memory (`write_cfgmem -format mcs -size 16 -interface SPIx4`), programmed via [`wildbits_jr2_6809_v8_rc12.mcs`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/wildbits_jr2_6809_v8_rc12.mcs).
 * **System Bus:** 21-bit physical address bus addressing up to 2 MB of physical address space.
 * **CPU Address Space:** 16-bit (64 KB) paged into eight 8 KB slots via 4 hardware Look-Up Tables (MLUTs).
 * **System RAM:** 512 KB onboard high-speed SRAM (Physical Blocks `$00 - $3F`, physical `0x000000 - 0x07FFFF`).
 * **Flash ROM:** 512 KB onboard non-volatile Flash ROM (Physical Blocks `$40 - $7F`, physical `0x080000 - 0x0FFFFF` of the SST39VF chip). Contains the Level 1 First Execution Unit (FEU), `/f0` flash volume, and user flash drive `/f1`.
 * **Expansion Cartridge:** Cartridge decode at Physical Blocks `$80 - $9F` (256 KB window) supporting `/c0` (based at `$80`) and `/c1` (based at `$90`), sharing the external bus and shaped write strobe with onboard flash and RTC.
-* **Video Controller:** **TinyVicky II** outputting DVI/VGA at 60 Hz (640 × 480 text, 320 × 240 graphics) or 70 Hz (640 × 400 text, 320 × 200 graphics). Features verified timing closure across all triple-clock domains (video, 100 MHz, 200 MHz) with worst negative slack +0.046 ns (`v8_rc11`).
+* **Video Controller:** **TinyVicky II** outputting DVI/VGA at 60 Hz (640 × 480 text, 320 × 240 graphics) or 70 Hz (640 × 400 text, 320 × 200 graphics). Features verified timing closure across all triple-clock domains (video, 100 MHz, 200 MHz) with worst negative slack **+0.188 ns** and worst hold slack **+0.029 ns**, zero failing endpoints (`v8_rc12`, incorporating the K2 video-mode resynchronizer hold-path waiver).
 * **Graphics Engines:**
   * Character text matrix (80 × 30, 80 × 60, 40 × 30, or 40 × 60) with dual 2 KB font banks pre-initialized with the **OS-9 Bannerfont** and color lookup tables pre-initialized with the **OS-9 Palette** directly in FPGA BRAM (`mif/Text_LUT_OS9_palette.coe` and `mif/Font_OS9_bannerfont.coe`), freeing >2 KB of system memory in bootfiles.
   * 3 full-screen 256-color bitmapped planes (320 × 200 or 320 × 240).
@@ -44,18 +44,18 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
   * 4 graphics Color Look-Up Tables (CLUTs), each with 256 24-bit RGB colors (stored as 32-bit `[Blue, Green, Red, Alpha]` entries).
   * Dedicated text Foreground and Background Color Look-Up Tables (16 colors each).
   * Hardware Gamma correction look-up tables (Red, Green, Blue).
-  * Hardware grayscale mouse cursor (16 × 16) with pixel rendering gated on enable bit (`$FEA0` bit 0, `v8_rc11`).
+  * Hardware grayscale mouse cursor (16 × 16) with pixel rendering gated on enable bit (`$FEA0` bit 0, `v8_rc11`+) and cursor position preserved across auto-hide (`wb/mouse_hide_unhide`).
 * **Audio Subsystem:**
   * Triple **SN76489** Programmable Sound Generators (PSGs) emulated in FPGA (Left at `$0200`, Center/Mono at `$0208`, Right at `$0210` in Block `$C4`; software-configurable stereo/mono via `SYS1`). Driven by a 3,579,545 Hz clock enable.
   * Triple **MOS 6581 / 8580** Sound Interface Devices (SIDs) (Left at `$0000`, Center/Mono at `$0080`, Right at `$0100` in Block `$C4`; 9 synth voices with multi-mode analog filters). Driven by a 1,022,727 Hz clock enable.
-  * **WM8776** Audio CODEC and 24-bit DAC at `$FE70-$FE72` for master mixing, equalization, and volume control (calibrated independently for Jr2 vs. K2 via the `play` audio engine).
-  * **VS1053b** Hardware MP3 / Audio Stream Decoder at `$FF50–$FF5F`, clocked at **24.576 MHz**, equipped with a 2,048-byte SDI stream FIFO at `$FF57`, 16 SCI registers at `$FF50–$FF53`, and hardware DREQ flow control.
+  * **WM8776** Audio CODEC and 24-bit DAC at `$FE70-$FE72` for master mixing, equalization, and volume control (InitCODEC selects all 5 analog inputs via R21 = `$1F` / `$2A1F`, routing VS1053 outputs on AIN3..5; calibrated independently for Jr2 vs. K2 via `play`).
+  * **VS1053b** Hardware MP3 / Audio Stream Decoder at `$FF50–$FF57`, clocked at **12.288 MHz** (24.576 MHz ÷ 2, within 12–13 MHz boot spec), equipped with a 2,048-byte SDI stream FIFO at `$FF57`, 16 SCI registers at `$FF50–$FF53`, dual-speed SPI (1.57 MHz default, 6.29 MHz fast), fixed register offset decoding (`v8_rc12`), and hardware DREQ flow control.
   * **SAM2695** General MIDI hardware synthesizer interface with **Edition 2 Control Register** at `$FF30-$FF35` featuring Tx/Rx FIFO-empty flags and hardware FIFO reset.
   * Hardware System Buzzer on `SYS0` (`$FE00` bit 4).
 * **Storage & Peripheral Interfaces:**
   * Dual SPI SD Card controllers (SD, SDHC, SDXC). Port 0 (`$FE90–$FE91`, external Main SD slot on top of PCB), Port 1 (`$FF00–$FF01`, internal Micro-SD slot on bottom of PCB).
   * High-speed **WizFi360** (WIZnet WiFi) module interface backed by dual 2 KB hardware FIFOs (`$FF20-$FF29`) supporting **WizCon4** (4 independent concurrent packet-mode incoming telnet shells).
-  * **16550** compatible UART (RS-232 serial) at `$FE60-$FE67` with 22.1184 MHz BAUDCE exact baud generator (Divisor 5 = 230,400 baud).
+  * **16550** compatible UART (RS-232 serial) at `$FE60-$FE67` with 22.1184 MHz BAUDCE exact baud generator (Divisor 5 = 230,400 baud) and hardened DriveWire driver stack (`wb/DriveWireCompatible`).
   * PS/2 Keyboard and Mouse controllers at `$FE50-$FE54` (Jr2 primary keyboard interface).
   * **WDC 65C22** Versatile Interface Adapter (VIA0) at `$FEB0–$FEBF` driving dual Atari-style DE-9 joystick ports and user GPIO.
   * NES / SNES gamepad controller interface at `$FF80-$FF8F` (FNX4N4S interface).
@@ -82,7 +82,7 @@ While both machines share the core TinyVicky II video engine, the FNX6809 CPU co
 | **Secondary VIA (`VIA1` at `$FFB0`)**| **Unpopulated** (VIA0 only at `$FEB0`) | Unpopulated on K2; present on older F256K mechanical models |
 | **Blocks `$80–$9F` Decode** | **External Cartridge Port** (`/c0` @ `$80`, `/c1` @ `$90`) | **Internal Expansion SRAM** (256 KB at `$10_0000–$13_FFFF`) |
 | **Network Interfaces** | **WizFi360 Wi-Fi only** (dual 2KB FIFOs at `$FF20-$FF29`) | **Dual:** WizFi360 Wi-Fi **+** WIZnet W6100 10/100 Ethernet |
-| **VS1053b Audio Decoder** | **Populated:** Clocked at **24.576 MHz** (`$FF50–$FF5F`) | **Populated:** Clocked at **12.288 MHz** (`$FF50–$FF5F`) |
+| **VS1053b Audio Decoder** | **Populated:** Clocked at **12.288 MHz** (`$FF50–$FF57`, 24.576 MHz ÷ 2) | **Populated:** Clocked at **12.288 MHz** (`$FF50–$FF57`, 24.576 MHz ÷ 2) |
 | **Case Logo LCD (`$FF70–$FF74`)** | **Unpopulated** (standalone motherboard) | **Populated** (front-panel SPI color Logo LCD) |
 | **Hardware DIP Switches (`$FF90`)** | **Onboard 8-position DIP switch bank** | **Rear-chassis 8-position DIP switch bank** |
 | **Machine ID Register (`$FE07`)** | **`$1A`** (26 decimal: Jr2 6809 core) | **`$16`** (22 decimal: K2 6809 core) |
@@ -92,26 +92,37 @@ While both machines share the core TinyVicky II video engine, the FNX6809 CPU co
 | **Status Indicators** | Discrete Motherboard LEDs (`SYS0`/`SYS1`: Power, SD, L0, L1) | RGB programmable keyboard LEDs (`$FE06`, `$FE08-$FE0F`) |
 
 > [!IMPORTANT]
-> **Emulator Scope Enforcement:** The MAME emulator driver `wbjr2` specifically emulates the **Wildbits Jr2**. It must NOT instantiate the optical keyboard scanner, W6100 Ethernet, case Logo LCD, or internal expansion SRAM at `$80–$9F`. It must expose the PS/2 keyboard/mouse interface, the dual cartridge ports (`/c0`, `/c1`), the dual SD card ports (`SDC0` at `$FE90`, `SDC1` at `$FF00`), the VS1053b audio decoder at 24.576 MHz, the onboard physical DIP switches, the shared bus write strobe behavior, and report `$1A` in Machine ID register `$FE07`.
-
----
+> **Emulator Scope Enforcement:** The MAME emulator driver `wbjr2` specifically emulates the **Wildbits Jr2**. It must NOT instantiate the optical keyboard scanner, W6100 Ethernet, case Logo LCD, or internal expansion SRAM at `$80–$9F`. It must expose the PS/2 keyboard/mouse interface, the dual cartridge ports (`/c0`, `/c1`), the dual SD card ports (`SDC0` at `$FE90`, `SDC1` at `$FF00`), the VS1053b audio decoder at 12.288 MHz, the onboard physical DIP switches, the shared bus write strobe behavior, and report `$1A` in Machine ID register `$FE07`.
 
 ---
 
 ### 1.3 Parity Release Package & Firmware File Reconciliation
 
-The official parity release kit for the Wildbits Jr2 (`parity_wildbits_jr2_v8_rc11.zip`, built 2026-09-05 10:38) contains the exact files required to configure the hardware, program non-volatile flash, and boot NitrOS-9 Level 2:
+The official parity release kit for the Wildbits Jr2 (`parity_wildbits_jr2_v8_rc12.zip`, core built 2026-09-06 12:33; parity kit built 2026-09-07 23:16) contains the exact files required to configure the hardware, program non-volatile flash, and boot NitrOS-9 Level 2:
 
 | File Name | Size | Target Hardware Entity | Function / Memory Destination |
 | :--- | :--- | :--- | :--- |
-| **`wildbits_jr2_6809_v8_rc11.mcs`** | 6,165,628 B | Micron MT25QL128 Quad-SPI Flash (16 MB) | **FPGA Configuration Memory.** Intel MCS-86 formatted bitstream with synchronization word `0xAA995566`. Automatically loaded by the FPGA upon power-on. |
+| **`wildbits_jr2_6809_v8_rc12.mcs`** | 6,165,628 B | Micron MT25QL128 Quad-SPI Flash (16 MB) | **FPGA Configuration Memory.** Intel MCS-86 formatted bitstream with synchronization word `0xAA995566`. Automatically loaded by the FPGA upon power-on. |
 | **`f0` through `f4`** | 8,192 B ea. (40 KB total) | SST39 Parallel Flash (Sectors `$38–$3C`) | **FEU System Image (`/f0`).** Read-only RBF volume holding FEU utilities, `sysgo`, and the interactive startup menu. Corresponds to MMU blocks `$78–$7C`. |
 | **`booter_0` through `booter_2`** | 8,192 B ea. (24 KB total) | SST39 Parallel Flash (Sectors `$3D–$3F`) | **Hardware Reset Booter & Trampolines.** Mapped to MMU blocks `$7D–$7F`. Block `$7F` supplies the 6809 hardware reset vector at `$FFFE`. |
 | **`bulk.csv`** | 74 B | `fnxmgr.py` / FoenixMgr Utility | **Flash Allocation Map.** Directly maps blocks `f0`–`f4` to flash sectors `$38–$3C`, and `booter_0`–`booter_2` to sectors `$3D–$3F`. Preserves sectors `$00–$37` (`/f1`). |
 | **`foenixmgr.ini`** | 84 B | `fnxmgr.py` Utility | Flashing tool parameters: `port=COM4`, `flash_address=3F0000`, `cpu=6809`. |
 | **`install.bat`** | 211 B | Windows Batch File | Invokes `python ../fnxmgr.py --port COM4 --flash-bulk bulk.csv`. |
-| **`l2_wildbitsjr2.dsk`** | 134,212,608 B (~128 MB) | External SPI SD Card (Port 0) | **NitrOS-9 Level 2 System Disk Image.** Formatted RBF filesystem incorporating all hardened drivers (`dwio_serial`, `wizfi` WizCon4, `rbmem`, `vtio` slot safety). |
-| **`*.md` Release Reports** | 2.5–10.6 KB | Documentation | Comprehensive postmortems covering video constraints closure, fast writes, flash hardening, DriveWire hardening, WizCon4, and MMU slot safety. |
+| **`l2_wildbitsjr2.dsk`** | 134,212,608 B (~128 MB) | External SPI SD Card (Port 0) | **NitrOS-9 Level 2 System Disk Image.** Formatted RBF filesystem incorporating all hardened drivers (`dwio_serial`, `wizfi` WizCon4, `rbmem`, `vtio` slot safety, DriveWire stack, VS1053 plugins). |
+| **`*.md` Release Reports** | 2.5–10.6 KB | Documentation | Comprehensive engineering reports covering VS1053b bridge rework and clocking, video constraints closure, fast writes, flash hardening, DriveWire hardening, WizCon4, and MMU slot safety. |
+
+#### Disk Image Reconciliation (rc11 vs. rc12 Parity Baseline):
+Inspection of `l2_wildbitsjr2.dsk` reveals deliberate maintenance and modernization updates in `v8_rc12`:
+* **Added Subsystems & Assets:**
+  * `/SYS/VSPLUGINS`: Dedicated binary DSP plugins (`switcher.plg`, `rtmidistart.plg`, `rtmidistop.plg`, `vs1053b_patches.plg`).
+  * `/SOUNDS`: 15 sample digital audio tracks for testing MP3, OGG, WAV, AAC, and format 0 MIDI playback.
+* **Pruned K2 Hardware Utilities (Enforcing Platform Isolation):**
+  * K2-only Ethernet and display utilities were explicitly removed from the Jr2 distribution disk: `CMDS/lcdload`, `CMDS/w6100eth`, `CMDS/w6100recv`, and `SYS/w6100ipconfig`.
+  * Extraneous standalone packages pruned: `CMDS/infocom`, `GAMES/INFOCOM/zork1.z3`, and `chk1`.
+* **Updated Modules & Executables:**
+  * `CMDS/vs`: 5,552 B → 9,096 B (upgraded from Edition 7 to **Edition 12**, embedding the software switcher patch table, DSP loader, and file-type clock table).
+  * `CMDS/scfg`: 5,405 B → 5,419 B (incorporating the 2026-09-07 `SS.ScTyp` sign-on banner fix).
+  * `OS9Boot`: 30,208 B → 30,720 B (incorporating hardened `dwio` `$37A`, `rbdw` `$252`, and `krn` with `wb/flink_fix` 3-page allowance).
 
 ---
 
@@ -236,8 +247,6 @@ $FFA8 - $FFAF: MMU Slot Mapping Registers (accesses EDIT_LUT selected by $FFA0[5
 
 ---
 
----
-
 ### 2.4 MMU Slot 2 Driver Window Architecture & Kernel Isolation
 
 In the Wildbits NitrOS-9 implementation, **Slot 2 (`$4000–$5FFF`)** is the designated communal driver work window:
@@ -272,6 +281,26 @@ When changing MMU mappings during boot or reboot, code cannot execute from a slo
 
 ---
 
+### 2.6 Kernel `F$Link` Module Placement & Fixed I/O Clearance (`wb/flink_fix`)
+
+* **The Tail-Hiding Hazard:** On the Wildbits 6809 core, the upper 768 bytes of the CPU address space (`$FD00–$FFFF`) are reserved for hardware fixed I/O decodes and switchable constant/vector RAM (`$FDxx` constant RAM, `$FExx` I/O, `$FFxx` I/O and vectors).
+* **The CoCo 3 vs. Wildbits Incompatibility:** In standard NitrOS-9 Level 2 on the Tandy Color Computer 3, the kernel's `F$Link` service routine (`FLink` in `level1/modules/kernel/flink.asm`) permitted programs to map into Slot 7 as long as they left a two-page margin (`$FE00–$FFFF`, 512 bytes). On Wildbits, fixed overrides span **three 256-byte pages** (`$FD00–$FFFF`, 768 bytes). If an executable program or shared library module had a size of `$1D00` bytes or greater (out of an 8 KB slot size of `$2000`), mapping it into Slot 7 caused the program's tail (from offset `$1D00` to `$1FFF`) to be shadowed and hidden by the `$FD00–$FFFF` fixed decodes. Executing or reading instructions in the module's tail fetched constant RAM or hardware I/O registers instead of executable code, crashing the application.
+* **Empirical Evidence & The Architectural Resolution (`wb/flink_fix`):**
+  * *Field Failure Benchmark:* A 7,470-byte (`$1D2E` B) test build of `vs` hung both Jr2 and K2 machines at launch because its tail landed in `$FD00–$FD2E`; a 7,212-byte (`$1C2C` B) build ran cleanly.
+  * *Algorithmic Implementation:* Rather than the slow CoCo 3 shift chain, `flink.asm` utilizes 6809 hardware multiplication:
+    ```asm
+    ldb   #8        ; hi * 8: block count lands in A
+    mul             ; A = hi >> 5 (blocks), B = (hi & $1F) << 3
+    cmpb  #$E8      ; low 5 bits >= 29 ($1D00 bytes)?
+    tfr   a,b       ; B = block count (run length)
+    bcs   FLinkWbNoBump ; below 29: slot 7 may hold it
+    inca            ; >= 29: start search one slot lower (Slot 6)
+    FLinkWbNoBump
+    ```
+  * *Result:* Modules requiring `$1D00` or more in their final block are actively prohibited from mapping into Slot 7. With `vs` expanding to **9,096 bytes** in `v8_rc12`, this fix ensures stable process execution across all application sizes.
+
+---
+
 ## 3. Memory-Mapped I/O Register Map (`$FE00 - $FFFF`)
 
 The following register map details every active hardware device decoded in the fixed I/O pages (`$FE00–$FFFF`) on the **Wildbits Jr2**:
@@ -291,10 +320,10 @@ The following register map details every active hardware device decoded in the f
 | **`$FE40 - $FE4F`** | `RTC` (R/W) | **bq4802 Real-Time Clock:**<br>Seconds, Minutes, Hours, Day, DOW, Month, Year, Century, Alarms, Rates, Enables, Flags, Control (`UTI`, `STOP`, `12/24`, `DSE`). Shared external bus (raw strobe). |
 | **`$FE50 - $FE54`** | `PS/2` (R/W) | **PS/2 Keyboard & Mouse Controller (Jr2 Primary Keyboard):**<br>• `$FE50`: `PS2_CTRL` (`[5:MCLR, 4:KCLR, 3:M_WR, 1:K_WR]`)<br>• `$FE51`: `PS2_OUT`<br>• `$FE52`: `KBD_IN` (FIFO data)<br>• `$FE53`: `MS_IN` (FIFO data)<br>• `$FE54`: `PS2_STAT` (`[7:K_AK, 6:K_NK, 5:M_AK, 4:M_NK, 1:MEMP, 0:KEMP]`) |
 | **`$FE60 - $FE67`** | `UART` (R/W) | **16550 UART (BAUDCE 22.1184 MHz Clocking):**<br>`RXD`/`TXR`, `IER`, `ISR`/`FCR`, `LCR`, `MCR`, `LSR`, `MSR`, `SPR`, `DLL`, `DLH` (Divisor 5 = 230,400 baud) |
-| **`$FE70 - $FE72`** | `CODEC` (R/W) | **WM8776 Audio CODEC:**<br>• `$FE70`: `CmdLo`<br>• `$FE71`: `CmdHi` (Register 7-bit + Data bit 8)<br>• `$FE72`: Status (R: `BUSY`) / Control (W: `START`) |
+| **`$FE70 - $FE72`** | `CODEC` (R/W) | **WM8776 Audio CODEC:**<br>• `$FE70`: `CmdLo`<br>• `$FE71`: `CmdHi` (Register 7-bit + Data bit 8)<br>• `$FE72`: Status (R: `BUSY`) / Control (W: `START`). `vtio` sets R21 = `$1F` (`$2A1F`) enabling AIN3..5 inputs for VS1053. |
 | **`$FE80 - $FE8F`** | `IEC` (R/W) | **Commodore IEC Serial Bus:**<br>DATA, CLK, ATN, SREQ line control and sense (drives Group 2 IRQ / optional NMI) |
 | **`$FE90 - $FE91`** | `SDC0` (R/W) | **External SPI SD Card Port 0 (Main SD Slot, Top of PCB):**<br>• `$FE90`: Status/Control (`[7:SPI_BUSY, 1:SPI_CLK, 0:CS_EN]`)<br>• `$FE91`: `SPI_DATA` (Used by `llwbsd` for `/s0` and `/s1`) |
-| **`$FEA0 - $FEA8`** | `MOUSE` (R/W) | **Hardware Mouse Cursor:**<br>• `$FEA0`: `MS_MEN` (`[1:MODE (0:host, 1:hardware PS/2), 0:ENABLE]`)<br>• `$FEA2-$FEA3`: `MS_X` (16-bit X position)<br>• `$FEA4-$FEA5`: `MS_Y` (16-bit Y position)<br>• `$FEA6-$FEA8`: `PS2_BYTE_0..2` |
+| **`$FEA0 - $FEA8`** | `MOUSE` (R/W) | **Hardware Mouse Cursor:**<br>• `$FEA0`: `MS_MEN` (`[1:MODE (0:host, 1:hardware PS/2), 0:ENABLE]` - pixel rendering gated on bit 0)<br>• `$FEA2-$FEA3`: `MS_X` (16-bit X position)<br>• `$FEA4-$FEA5`: `MS_Y` (16-bit Y position)<br>• `$FEA6-$FEA8`: `PS2_BYTE_0..2` |
 | **`$FEB0 - $FEBF`** | `VIA0` (R/W) | **WDC 65C22 VIA 0:**<br>`IORB` (Joystick Port 0), `IORA` (Joystick Port 1), `DDRB`, `DDRA`, `T1CL/H`, `T1LL/H`, `T2CL/H`, `SR`, `ACR`, `PCR`, `IFR`, `IER`, `IORA2` |
 | **`$FEC0 - $FED7`** | `DMA` (R/W) | **TinyVicky DMA Controller:**<br>• `$FEC0`: `DMA_CTRL` (`[7:START, 3:INT_EN, 2:FILL, 1:2D, 0:ENABLE]`)<br>• `$FEC1`: `DMA_STATUS` (R: `BUSY`) / `DMA_DATA_2_WRITE` (W: Fill byte)<br>• `$FEC4-$FEC6`: 24-bit Source Address (`SA_H`, `SA_M`, `SA_L`)<br>• `$FEC8-$FECA`: 24-bit Dest Address (`DA_H`, `DA_M`, `DA_L`)<br>• `$FECD-$FECF`: 24-bit 1D Size (`DZ_L`, `DZ_M`, `DZ_H`)<br>• `$FED0-$FED3`: 2D Size (`WIDTH_H/L`, `HEIGHT_H/L`)<br>• `$FED4-$FED7`: 2D Strides (`SRC_STRIDE_H/L`, `DST_STRIDE_H/L`) |
 | **`$FEE0 - $FEFB`** | `MATH` (R/W) | **Hardware Integer Math Coprocessor:**<br>• `$FEE0-$FEE3`: `MULU_A_H/L`, `MULU_B_H/L` → `$FEF0-$FEF3`: `MULU_HH/HL/LH/LL` (16 × 16 → 32-bit)<br>• `$FEE4-$FEE7`: `DIVU_DEN_H/L`, `DIVU_NUM_H/L` → `$FEF4-$FEF5`: `QUOU_H/L`, `$FEF6-$FEF7`: `REMU_H/L` (32 / 16 → 16-bit)<br>• `$FEE8-$FEEF`: `ADD_A_HH..LL`, `ADD_B_HH..LL` → `$FEF8-$FEFB`: `ADD_R_HH..LL` (32-bit Add) |
@@ -302,7 +331,7 @@ The following register map details every active hardware device decoded in the f
 | **`$FF10 - $FF18`** | `FL_DMA` (R/W) | **Splash / SPI Flash DMA Controller:**<br>• `$FF10`: Control (R: `[7:BUSY, 6:FIFO_EMPTY]`)<br>• `$FF11`: Flash Command Byte<br>• `$FF12-$FF13`: Receive FIFO Byte Count (12-bit)<br>• `$FF14-$FF16`: Flash 24-bit Source Address<br>• `$FF17`: Transfer Size / Control<br>• `$FF18`: FIFO Data Port (pops byte) |
 | **`$FF20 - $FF29`** | `WIZFI` (R/W) | **WizFi360 Hardware FIFO Bridge:**<br>• `$FF20`: `CtrlReg` (`[3:TxEmpty, 2:RxEmpty, 1:Reset, 0:Rate]`)<br>• `$FF21`: `DataReg` (TX push / RX pop)<br>• `$FF22-$FF23`: `RxD_RD_Cnt` (16-bit)<br>• `$FF24-$FF25`: `RxD_WR_Cnt` (16-bit Available RX Bytes)<br>• `$FF26-$FF27`: `TxD_RD_Cnt` (16-bit)<br>• `$FF28-$FF29`: `TxD_WR_Cnt` (16-bit) |
 | **`$FF30 - $FF35`** | `SAM2695` (R/W)| **SAM2695 MIDI Synth Interface (Edition 2):**<br>• `$FF30` Read: `[3:Tx_empty, 2:Rx_empty]`; Write: `[1:FIFO_Reset]` (write 1, then write 0 to release)<br>• `$FF31`: FIFO Data Port<br>• `$FF32-$FF33`: `RXD_COUNT_LOW/HI` (16-bit available RX byte count)<br>• `$FF34-$FF35`: `TXD_COUNT_LOW/HI` (16-bit TX byte count) |
-| **`$FF50 - $FF5F`** | `VS1053` (R/W) | **VS1053b Hardware MP3 / Audio Stream Decoder (Clocked at 24.576 MHz):**<br>• `$FF50`: Control (`[7:BUSY (R), 3:RESET, 2:FAST_SPI, 1:READ, 0:START]` (0→1 edge))<br>• `$FF51`: SCI Register Select (0..F: MODE, STATUS, BASS, CLOCKF, DECODE_TIME, AUDATA, etc.)<br>• `$FF52-$FF53`: SCI Data High / Low (16-bit register value write/read)<br>• `$FF54`: SDI Stream FIFO Status (R: `[7:EMPTY, 6:FULL, 2..0:COUNT_10..8]`)<br>• `$FF55`: SDI Stream FIFO Count (R: Count bits 7..0)<br>• `$FF57`: SDI Stream Data Port (W: pushes byte to 2,048-byte hardware stream FIFO)<br>• `$FF58-$FF5F`: Read mirror of `$FF50-$FF57` (hardware DREQ flow control) |
+| **`$FF50 - $FF57`** | `VS1053` (R/W) | **VS1053b Hardware MP3 / Audio Stream Decoder (Clocked at 12.288 MHz; Fixed Offset Decode in `v8_rc12`):**<br>• `$FF50`: `VS_CTRL` (`[7:BUSY (R), 3:RESET (W: drives XRESET low, flushes FIFO), 2:FAST_SPI (W: 1=6.29 MHz, 0=1.57 MHz), 1:READ (W: 1=read, 0=write), 0:START (W: 0→1 edge)]`)<br>• `$FF51`: `VS_SCI_SEL` (SCI Register Select 0..F: MODE, STATUS, BASS, CLOCKF, DECODE_TIME, AUDATA, etc.)<br>• `$FF52-$FF53`: `VS_SCI_DATA_H/L` (16-bit register value write/read, big-endian)<br>• `$FF54`: `VS_SDI_STAT` (R: `[7:EMPTY, 6:FULL, 2..0:COUNT_10..8]`; reading `$FF54` snapshots the 11-bit count for `$FF55`)<br>• `$FF55`: `VS_SDI_COUNT` (R: Count bits 7..0)<br>• `$FF56`: Reserved (`$00`)<br>• `$FF57`: `VS_SDI_DATA` (W: pushes byte to 2,048-byte hardware stream FIFO)<br>• `$FF58-$FF5F`: Read mirror of `$FF50-$FF57` (hardware DREQ flow control) |
 | **`$FF60 - $FF6F`** | `I2C` (R/W) | **I2C Master Controller:** Drives SiI9022 HDMI transmitter setup at reset and user I2C devices |
 | **`$FF80 - $FF8F`** | `GAMEPAD` (R/W)| **NES / SNES Gamepad Controller (FNX4N4S Serial Interface):**<br>• `$FF80`: Control (`[7:START_FETCH, 2:PAD_TYPE (0:SNES, 1:NES), 0:ENABLE]`)<br>• `$FF81-$FF8F`: Latched 16-bit button state registers for connected pads |
 | **`$FF90`** | `DIP_SW` (R) | **Onboard 8-Position Hardware DIP Switches:**<br>• Bit 7: `SW_GAMMA_ON` (Hardware Gamma correction default enable)<br>• Bits 6..4: `SW_USER2..0` (General user-configurable switches)<br>• Bits 3..0: `SW_BOOT_MODE3..0` (Hardware boot source selection; **Bit 0 `SW_BOOT_MODE0`** enables Turbo stretch mode ~1.4x on v8 cores) |
@@ -383,7 +412,7 @@ Pre-initialized directly into FPGA BRAM (`TEXT_CLR_LUT`, `mif/Text_LUT_OS9_palet
   * `$16 - $1F`: Formatting and special control glyphs.
   * `$20 - $7E`: Full standard ASCII character set.
   * `$7F - $FF`: Extended international, accented, and box-drawing symbols.
-* **Bootfile Space Savings:** By embedding the font and palette directly into FPGA BRAM at power-on (`v8_rc10`+), NitrOS-9 Level 1 (FEU) and Level 2 bootfiles omit `palette` and `bannerfont` modules, saving over 2 KB of memory. Both raw binary assets are extracted as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.bin) and [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.bin).
+* **Bootfile Space Savings:** By embedding the font and palette directly into FPGA BRAM at power-on (`v8_rc10`+), NitrOS-9 Level 1 (FEU) and Level 2 bootfiles omit `palette` and `bannerfont` modules, saving over 2 KB of memory. Both raw binary assets are extracted as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/bannerfont.bin) and [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/os9_palette.bin).
 
 ### 4.3 Hardware Text Cursor Registers (`$FFD0 - $FFD7`)
 
@@ -471,6 +500,12 @@ Sprite coordinates operate in a **32-pixel offset border space** allowing sprite
 * **Visible Bottom-Right:** (351, 271) (for 320 x 240 display area).
 * **Screen Center (for 8 x 8 sprite):** X = 32 + (320 - 8) / 2 = 188 (`$00BC`), Y = 32 + (240 - 8) / 2 = 148 (`$0094`).
 
+#### 6. Sprite Testing Suite & Verification (`sprtest128`, `sprtest2`):
+* **`sprtest128` (Added in `wb/nitrobotics`):** Exercises the full 128-sprite hardware capacity across all 4 CLUTs and variable sprite sizes (8×8, 16×16, 24×24, 32×32) simultaneously. Bitmap data is allocated dynamically via kernel `F$SRqMem`, verifying line-buffer scanning timing margins during horizontal blanking without pipeline drops or FIFO underflow.
+* **`sprtest2` (Edition 2):**
+  * **Big-Endian Coordinates:** Verified standard 6809 big-endian coordinates in Page `$C0` (`$1300–$16FF`), where a single `STD` at `SPR_X_H` or `SPR_Y_H` sets the full 16-bit coordinate.
+  * **16-Bit Word Fetch Alignment:** Because the FPGA sprite engine (`Sprite_State_Machine.v`) fetches bitmap data across the 16-bit SRAM bus in 16-bit words, odd-aligned pixel buffers cause pixel 0 of every row to display corrupt data. Edition 2 introduces a pad byte ensuring all sprite bitmap buffers are strictly **even-byte aligned**.
+
 ---
 
 ### 4.5 TinyVicky II 256-Color Bitmap Graphics Engine (`BM0`, `BM1`, `BM2`)
@@ -539,9 +574,11 @@ TinyVicky provides dedicated hardware Gamma correction tables to equalize color 
 * **Activation:** Enabled via Master Control Register 0 (`$FFC0` bit 6, `GAMMA_En = $40`) or DIP switch 7 (`SW_GAMMA_ON`).
 
 #### 2. Hardware Mouse Cursor Engine:
-* **Cursor Bitmap (Page `$C0`, Offsets `$0400–$05FF`):** Dedicated 16 × 16 pixel cursor graphic stored at 2 bits per pixel (or 8 bpp grayscale) allowing customizable hardware pointers without software sprite overhead.
+* **Cursor Bitmap (Page `$C0`, Offsets `$0C00–$0CFF`):** Dedicated 16 × 16 pixel cursor graphic (256 bytes; `0` = transparent, `1` = black interior, `255` = white border) mapped at `$4C00` via Slot 2 by `mousedrv`.
+* **Hardware Enable Gating (`v8_rc11`+):** Hardware pixel rendering is strictly gated on the enable bit (`$FEA0` bit 0). On older cores, an unplugged mouse after reset could leave a solid orphaned block on screen, requiring `vtio` to park the cursor coordinates off-screen. With hardware enable gating, disabling the cursor cleanly removes it from video compositing.
+* **Cursor Position Preservation Across Auto-Hide (`wb/mouse_hide_unhide`):** When `vtio` auto-hides the mouse cursor after an inactivity timeout (~4 seconds), it clears `$FEA0` bit 0 without modifying cursor coordinate registers `$FEA2–$FEA5`. When subsequent mouse packets arrive, the cursor is re-enabled at its exact previous coordinates rather than warping unexpectedly to the right screen border.
 * **Cursor Control Registers (`$FEA0–$FEA8` in Fixed I/O):**
-  * `$FEA0` (`MS_MEN`): Bit 0 = Cursor Visible, Bit 1 = Mode (`0` = Host CPU updates coordinates, `1` = Hardware auto-tracks PS/2 mouse packets directly from `$FE53`).
+  * `$FEA0` (`MS_MEN`): Bit 0 = Cursor Enable/Visible (`1` = visible, `0` = hidden), Bit 1 = Mode (`0` = Host CPU updates coordinates, `1` = Hardware auto-tracks PS/2 mouse packets directly from `$FE53`).
   * `$FEA2-$FEA3`: 16-bit Mouse X position.
   * `$FEA4-$FEA5`: 16-bit Mouse Y position.
 
@@ -959,11 +996,22 @@ The Wildbits Jr2 features a physical 16550-compatible UART mapped at `$FE60-$FE6
   ```
 * **Core & Driver Pairing:** The hardened NitrOS-9 serial driver (`dwinit_wildbits_serial.asm`) writes divisor **5** (matching `v8_rc3`+ cores).
 
-#### 2. DriveWire Protocol & Driver Hardening (`wildbits-drivewire-hardening.md`):
-* **Bounded TX Drain:** `DWWrite` bounds the transmitter-empty wait (~65k iterations) inside masked sections, preventing infinite machine hangs if transmission stalls.
-* **Framing Slip Prevention (`ReadAbort`):** On a failed sector read, the driver transmits a deliberately erroneous checksum and drains the status byte so the DriveWire 4 server stays in sync rather than interpreting the next command's opcode as checksum bytes.
-* **Hardware FIFO Purge (`PurgeRX`):** On any failed transaction, `PurgeRX` strobes the 16550 `FCR` RX-FIFO reset bit to clear FIFO state that could otherwise become wedged by overrun, and listens with a stretched window (~200–350 ms) to absorb server Java GC scheduler stalls.
-* **Stale Stream Purge Before Retry:** The hardened `rbdw` (`$252`) driver purges the receive queue before retrying an `OP_REREADEX`, preventing a client from locking into a 1-transaction-lagged stream.
+#### 2. DriveWire Protocol & Driver Hardening (`wildbits-drivewire-hardening.md`, `wb/DriveWireCompatible`):
+* **Bounded TX Drain:** `DWWrite` bounds the transmitter-empty wait (~65k iterations per byte) inside masked sections, eliminating the driver's only infinite-spin path so a wedged UART cannot hang the system.
+* **Framing Slip Prevention (`ReadAbort`):** On a failed sector read, the driver sends a deliberately erroneous checksum and drains the status byte before exiting. This satisfies the server parser, preventing server-side frame slip (which historically caused `UNKNOWN OPCODE` warnings and corrupted LSN requests).
+* **Hardware FIFO Purge (`PurgeRX`) on Every Failure:** On any failed transaction (not only timeouts), `PurgeRX` strobes the 16550 `FCR` RX-FIFO hardware reset on entry to clear overrun-wedged FIFO pointer state, treating any status byte other than OK or `E$CRC` as proof of desync.
+* **Absorbing Server-Side GC Stalls:** The purge idle window is stretched to **~200–350 ms**, allowing the client to outlast Java GC scheduler pauses in the DriveWire 4 server and consume late-arriving sector bursts cleanly.
+* **Purge Before Retry & Lagged Stream Recovery:** The hardened `rbdw` driver runs `PurgeRX` *before* retrying via `OP_REREADEX`, ensuring retries read fresh, aligned data rather than remaining permanently locked one transaction behind.
+* **Trailing-Byte Check on Status OK:** On a synchronized line, the server delivers no bytes after the status byte. If a trailing byte arrives within ~200 µs (at 230,400 baud, next bytes arrive in ~43 µs), the "OK" belongs to a stale previous transaction; the read is immediately retried rather than silently accepting corrupted data.
+* **Abort Long-Listen (~2s–6s):** When an aborted read's status byte does not arrive due to a deep server pause, the driver listens for up to ~2–6 seconds for the late burst to emerge before declaring the line clean.
+* **Turbo-Safe Cycle-Counted Multipliers (`wb/DriveWireCompatible`, commit `486bdf9`):**
+  * All wait and timeout multipliers were expanded by +50% to maintain generous margins under ~1.4x Turbo mode:
+    * `DW_TIMEOUT_MULT`: 8 → 12 (~2.7 s in turbo)
+    * `DW_PURGE_IDLE`: 2,048 → 3,072 iterations (~5.5 ms)
+    * `DW_PURGE_MULT`: 4 → 6 (~1.3 s)
+    * `DW_ABWAIT_MULT`: 24 → 36 (~6 s)
+  * These bounds only expire when the line is idle, guaranteeing zero impact on standard transfer throughput.
+* **Module Fingerprints:** Verified on `l2_wildbitsjr2.dsk`: `dwio_serial` = **`$37A`** (1,218 bytes), `rbdw` = **`$252`** (640 bytes) (incorporating all retry purges, trailing-byte checks, and abort listen extensions).
 
 ```mermaid
 graph TD
@@ -1152,7 +1200,7 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
   * `R23` (`0x2E00`): Software reset WM8776 to default state.
   * `R10` (`0x1402`): DAC Interface Control — 16-bit I2S audio format.
   * `R17` (`0x2301`): ALC Control 2.
-  * `R21` (`0x2A03`): ADC MUX Control (AIN selected).
+  * `R21` (`0x2A1F`): ADC MUX Control — **All 5 analog inputs enabled** (`$1F`), routing VS1053b stereo outputs on AIN3..5 directly into the analog mixer.
   * `R22` (`0x2C07`): Output MUX Control — MX[2:0] = 111 (Bypass, Aux, DAC enabled).
   * `R13` (`0x1A00`): Power Down Control — all channels active (unmuted).
   * `R03` (`0x07F0`): Left DAC attenuation.
@@ -1172,24 +1220,40 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
   * `$FF34-$FF35` (`MIDI_TXD_COUNT_LOW/HI`): 16-bit count of bytes remaining in TX FIFO.
   * Generates `INT_MIDI_RX` on Interrupt Group 3, bit 1 when incoming MIDI data arrives.
 
-#### 4. VS1053b Hardware MP3 / Audio Stream Decoder Subsystem (`$FF50 - $FF5F`):
+#### 4. VS1053b Hardware MP3 / Audio Stream Decoder Subsystem (`$FF50 - $FF57`, `v8_rc12`):
 * **Hardware Truth:** The VLSI Solution **VS1053b** audio codec / MP3 decoder is physically populated on the Wildbits Jr2 Pico-ITX board.
-* **Master Clocking:** On the Wildbits Jr2, the VS1053b is clocked at **24.576 MHz** (compared to 12.288 MHz on the K2). Chip reset follows system cold reset.
-* **Hardware Flow Control & Stream FIFO:** The FPGA bridges CPU accesses to the VS1053b's Serial Control Interface (SCI) and Serial Data Interface (SDI) via hardware DREQ pacing:
-  * Dedicated **2,048-byte hardware SDI stream FIFO** buffers audio stream data, automatically shifting bytes to the decoder over XDCS as the chip's DREQ line permits.
-  * Register `$FF50` bit 7 (`BUSY`) provides atomic hardware status, staying asserted while a command is transmitting or while waiting for DREQ.
-* **Register Interface (`$FF50 - $FF5F`):**
+* **Master Clocking & Operational Baseline (`v8_rc12`):**
+  * On earlier cores, the VS1053b was clocked with the raw 24.576 MHz oscillator, placing it outside its 12–13 MHz boot specification. In `v8_rc12`, the clock is divided by 2 to **12.288 MHz**, matching the K2 core.
+  * **FPGA Register Decode Fix:** In previous Jr2 cores, the I/O page address decoder passed the full `$5x` address instead of the register offset (`$00–$07`), causing every write to `$FF50–$FF57` to be ignored. In `v8_rc12`, register offset decoding is fully operational.
+* **FPGA Bridge & Dual-Speed SPI Engine:**
+  * **Default Boot SPI Rate:** Operates at `IO_Clk / 16 = 1.57 MHz` at reset to satisfy the VS1053b uninitialized clock limit.
+  * **Fast SPI Rate (`VS_FAST`):** Writing `1` to `CTRL` bit 2 (`VS_FAST`) elevates SPI clocking to `IO_Clk / 4 = 6.29 MHz` once the internal PLL clock multiplier is configured via SCI register `CLOCKF`.
+  * **Cycle Timing:** Strictly 32 clocks per SCI register command, 8 clocks per SDI stream byte.
+  * **Flow Control:** The VS1053b's hardware `DREQ` line is synchronized through a two-flop synchronizer into the FPGA state machine.
+* **Stream FIFO & Register Interface (`$FF50 - $FF57`):**
+  * Dedicated **2,048-byte hardware SDI stream FIFO** buffers audio stream data at `$FF57`, automatically shifting bytes to the decoder over XDCS as DREQ permits.
   * **`$FF50` (`VS_CTRL`):**
-    * Write: Bit 0 = `START` (0→1 edge initiates SCI transaction; does not self-clear), Bit 1 = `READ` (`1` = SCI read, `0` = SCI write), Bit 2 = `FAST_SPI` (`1` = 6.29 MHz fast clock after `CLOCKF` initialization, `0` = 1.57 MHz boot clock), Bit 3 = `RESET` (`1` = holds chip XRESET low, flushes SDI FIFO).
+    * Write: Bit 0 = `START` (0→1 edge initiates SCI transaction; does not self-clear), Bit 1 = `READ` (`1` = SCI read, `0` = SCI write), Bit 2 = `FAST_SPI` (`1` = 6.29 MHz fast clock after `CLOCKF` setup, `0` = 1.57 MHz boot clock), Bit 3 = `RESET` (`1` = holds chip XRESET low, flushes SDI FIFO, idles bit engine).
     * Read: Bit 7 = `BUSY` (SCI transfer in progress or waiting for DREQ).
   * **`$FF51` (`VS_SCI_SEL`):** Selects SCI register index (0..F: `MODE`, `STATUS`, `BASS`, `CLOCKF`, `DECODE_TIME`, `AUDATA`, `WRAM`, `WRAMADDR`, `HDAT0`, `HDAT1`, `AIADDR`, `VOL`, `AICTRL0..3`).
-  * **`$FF52 - $FF53` (`VS_SCI_DATA_H/L`):** 16-bit SCI register data write/read port (accessible atomically with a single `std` / `ldd` at `$FF52`).
-  * **`$FF54` (`VS_SDI_STAT`):** SDI FIFO status (Bit 7 = Empty, Bit 6 = Full, Bits 2..0 = FIFO count bits 10..8 snapshot).
+  * **`$FF52 - $FF53` (`VS_SCI_DATA_H/L`):** 16-bit SCI register data write/read port (accessible atomically via big-endian `std` / `ldd` at `$FF52`).
+  * **`$FF54` (`VS_SDI_STAT`):** SDI FIFO status (Bit 7 = Empty, Bit 6 = Full, Bits 2..0 = FIFO count bits 10..8 snapshot). Reading `$FF54` snapshots the 11-bit count for `$FF55`.
   * **`$FF55` (`VS_SDI_COUNT`):** SDI FIFO count bits 7..0 (`ldd $FF54` then `anda #$07` yields the full 11-bit byte count atomically).
   * **`$FF56`:** Reserved (reads as `$00`).
-  * **`$FF57` (`VS_SDI_DATA`):** SDI stream write port. Bytes written here are pushed to the 2,048-byte FIFO.
+  * **`$FF57` (`VS_SDI_DATA`):** SDI stream write port. Bytes written here are pushed into the 2,048-byte FIFO.
   * **`$FF58 - $FF5F`:** Read mirrors of `$FF50–$FF57`.
-* **Software & Diagnostics:** NitrOS-9 provides equates in `defs/wildbits.d` and includes the dedicated **`vs`** command player and hardware diagnostic tool in `/CMDS` on `l2_wildbitsjr2.dsk`.
+* **The Jr2 PCB GPIO1 Boot Strap & Workarounds:**
+  * *The PCB Flaw:* One Jr2 PCB production run ties pin 34 (GPIO1) directly to VCC. At power-on or reset, the chip samples GPIO0/1 and boots into real-time MIDI synthesizer mode (`GPIO IN $0A02`, `AUDATA $AC45`), rendering ordinary stream decoding (MP3/OGG/WAV) completely silent.
+  * *Hardware Fix:* Solder a small bridge from pin 33 (GPIO0) to pin 34 (GPIO1). Pulling GPIO0 high forces an initial SPI boot check; finding no external EEPROM, the chip falls back to standard stream decoding. Running `vs -i` reports `GPIO0 = 1` when bridged.
+  * *Software Workaround (The Switcher):* `vs` incorporates an internal `Switch` patch table. When `vs` resets the chip and detects `GPIO1 = 1`, it automatically uploads the switcher patch (also available standalone as `SYS/VSPLUGINS/switcher.plg`), installing an execution detour in chip IRAM that jumps past the strap-checking loop to `$3FD5`, restoring normal stream decoding without requiring hardware soldering!
+* **Software Tooling, Plugins & Sample Files:**
+  * **`vs` Command Utility (`wb/vs1053`, in `/CMDS`, Edition 12, 9,096 B):**
+    * *Evolution:* Progressed from Edition 7 (basic playback) to Edition 10 (integrated automatic switcher), Edition 11 (`DefClk` filename pointer fix), and **Edition 12** (automated file-type clock tables).
+    * `vs -s <file>`: Streams audio files. Automatically selects clock multiplier from internal `ClkTab`: `$60` (3.0x/3.5x) for MP3, OGG, and WAV; `$70` for AAC, WMA, M4A, and MP4; `$A0` (4.5x) for format 0 MIDI (`.mid`).
+    * Mode Switching: `vs -n` forces real-time MIDI synth mode (plays live MIDI events over SDI); `vs -o` forces stream decoder mode.
+    * Diagnostics & Control: `vs` alone runs self-test chain, `-t` sine wave test, `-m` memory test, `-r` reset, `-i` chip state and GPIO pins, `-v <hh>` volume, `-c <hh>` clock override, `-g` disable GBUF, `-b` background stream playback.
+  * **Plugin Directory (`/SYS/VSPLUGINS`):** Houses loadable binary DSP patches: `switcher.plg`, `rtmidistart.plg`, `rtmidistop.plg`, and `vs1053b_patches.plg`.
+  * **Audio Samples (`/SOUNDS`):** 15 sample audio tracks packaged directly on `l2_wildbitsjr2.dsk`.
 * **Interrupt Routing:** Incoming MIDI streaming data from the VS1053b asserts `INT_MIDI_VS_RX` on Interrupt Group 3, bit 4 (`NEW_Rx_FIFO_MIDI_VS_Sync`).
 
 #### 5. Hardware System Buzzer:
@@ -1265,7 +1329,7 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
 
 ### 8.1 Authoritative Ground Truth Hierarchy & Branch Overlay Model
 
-In developing and verifying the Wildbits Jr2 architecture, the primary source of truth is the **Nitrobotics Resource Portal** (`https://nitrobotics.github.io/Wildbits/`) and the shipping hardware parity kits (`parity_wildbits_jr2_v8_rc11`).
+In developing and verifying the Wildbits Jr2 architecture, the primary source of truth is the **Nitrobotics Resource Portal** (`https://nitrobotics.github.io/Wildbits/`) and the shipping hardware parity kits (`parity_wildbits_jr2_v8_rc12`).
 
 Under the Nitrobotics development workflow, disk images are built from `nitros9/main` with active feature and hardware bugfix branches overlaid onto the tree at build time:
 
@@ -1275,31 +1339,36 @@ Under the Nitrobotics development workflow, disk images are built from `nitros9/
   * `wb/wildspeed`: Benchmarking suite with per-bus-cycle-class MHz measurement.
   * `wb/defs_updates`: Official hardware definitions matching shipping cores (`defs/wildbits.d`).
   * `wb/play`: Independent per-machine audio leveling for K2 vs. Jr2.
-* **Overlaid Feature Branches at Build Time:**
-  * `wb/drivewire_hardening`: Aggressive error recovery and BAUDCE divisor 5 (230,400 baud).
-  * `wb/vs1053`: Dedicated `vs` command tool and equates for the hardware VS1053b MP3/audio decoder.
-  * `wb/mouse_hide_unhide`: Preserves cursor position across auto-hide rather than resetting to border.
-  * `wb/k2_core_typematic_support`: K2 hardware-typematic keyboard support (K2 only; unpopulated on Jr2).
+* **Overlaid Feature Branches at Build Time (Active Parity Baseline):**
+  * `wb/k2_core_typematic_support`: K2 hardware-typematic keyboard support: interrupt-driven keydrv with core key repeat (K2 only; unpopulated on Jr2).
+  * `wb/flink_fix`: Kernel `F$Link` maps a program of `$1D00` bytes or more below slot 7, where this core's fixed pages (`$FD00–$FFFF`) would hide its tail; wildbits requires a three-page allowance ($300 bytes) versus two pages on CoCo3.
+  * `wb/nitrobotics`: `wbinfo` summary output with turbo-mode detection, fix to the sysgo-scfg partnership for showing the large NitrOS-9 banner (`SS.ScTyp`), `sprtest128` 128-sprite testing tool, and big-endian coordinates & 16-bit word alignment in `sprtest2` (Edition 2).
+  * `wb/mouse_hide_unhide`: The mouse cursor returns to where you left it after an auto-hide, instead of reappearing at the right border.
+  * `wb/DriveWireCompatible` (`wb/drivewire_hardening`): DriveWire hardening for the BAUDCE cores: exact 230,400 baud (divisor 5), a bounded transmit wait so a wedged UART can no longer hang the machine, an abort handshake (`ReadAbort`) that keeps the server framed on failed reads, stream resync (`PurgeRX`) with FCR FIFO reset so an off-by-N link recovers instead of cascading errors, and +50% widened idle wait windows for turbo safety.
+  * `wb/vs1053`: Hardware VS1053b MP3/audio stream decoder support (`vs` command utility upgraded to Edition 12 with embedded software switcher and automated file-type clock tables, equates in `defs/wildbits.d`, and DSP plugins in `/SYS/VSPLUGINS`).
 
 ### 8.2 Hardware Source Truth (FPGA RTL)
 Traced directly from the authoritative core repository (`fpga-6809-cores-staging`, `nitrobotics`):
-* `CFP95139AJR2_Top.v`: Top-level pin mapping, clock generation, synthesizer enable frequencies.
+* `CFP95139AJR2_Top.v`: Top-level pin mapping, clock generation, synthesizer enable frequencies, VS1053b 12.288 MHz clock divider.
 * `IRQ_Controller_Jr.v`: 32-line interrupt controller logic and concatenation vectors.
 * `TyVKy2_MMU_Register.v` / `TyVKy2K2x1_MMU_Register.v`: MMU LUT entry encoding, active vs. edit LUT selection, constant RAM enable bits (`$FFA1`), and `RAM_Access_Inhibit` logic.
 * `TyVKy2K2turbo_MMU_FNX6809.v`: Page decodes (`$FDxx`, `$FExx`, refined `$FF00–$FF9F` / `$FFB0–$FFEF`, `$FFAx`, `$FFFx`), turbo frame timing.
 * `TinyVKY2K2_IO_Page0_Devices.v`: Sectored I/O Page `$C0` sprite attribute BRAM decoding, `RecodedAddy[9:8]` selector fix (`v8_rc7`+).
+* `VS1053_SPI_Bridge.v`: Fixed register offset decoding (`v8_rc12`), 12.288 MHz clocking, dual-speed SPI (1.57 / 6.29 MHz), two-flop DREQ synchronizer, and 2KB SDI FIFO port at `$FF57`.
 
 ### 8.3 Operating System & Driver Implementation
 Traced from `nitros9project/nitros9` and parity release disk inspection:
-* `level2/modules/kernel/krn.asm`: Cold-start interrupt controller initialization, block map at `$0200`, Slot 2 reservation.
-* `level1/wildbits/modules/vtio.asm`: Text video driver, WM8776 `InitCODEC` 16-bit register stream, Layer control (`$FFC2`/`$FFC3`).
+* `level2/modules/kernel/krn.asm`: Cold-start interrupt controller initialization, block map at `$0200`, Slot 2 reservation, `F$Link` 3-page allowance below Slot 7 (`wb/flink_fix`).
+* `level1/wildbits/modules/vtio.asm`: Text video driver, WM8776 `InitCODEC` 16-bit register stream (R21 = `$2A1F` ADC input mux routing VS1053 on AIN3..5), Layer control (`$FFC2`/`$FFC3`).
 * `level1/wildbits/modules/keydrv.asm`: PS/2 keyboard driver for Jr2.
+* `level1/wildbits/modules/mousedrv.asm`: Relative PS/2 mouse packet processing and cursor coordinate preservation (`wb/mouse_hide_unhide`).
 * `level1/wildbits/modules/wizfi.asm`: WizCon4 network driver.
 * `level1/wildbits/modules/llwbsd.asm`: Low-level SPI SD card driver.
 * `level1/wildbits/modules/rbmem.asm`: Flash and cartridge block access driver.
+* `level1/modules/rbdw.asm` & `level1/wildbits/modules/dw*.asm`: Hardened DriveWire serial driver stack (`$252` / `$37A`).
 
 ### 8.4 Reference Packages & Parity Releases
-* **Wildbits Jr2 Parity Package:** `parity_wildbits_jr2_v8_rc11.zip` (Core built 2026-09-05 10:14; parity kit built 2026-09-06 01:07 by Roger Taylor).
+* **Wildbits Jr2 Parity Package:** `parity_wildbits_jr2_v8_rc12.zip` (Core built 2026-09-06 12:33; parity kit built 2026-09-07 23:16 by Roger Taylor).
 * **F256Jr2 Rev A Hardware Specifications:** Foenix Retro Systems Short Form Specification Sheet (`F256JR2_-_Specs_-_OneSheeter_RevA.png`).
 
 ---
@@ -1344,7 +1413,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * `R23` (`0x2E00`): Software reset.
   * `R10` (`0x1402`): DAC Interface Control — 16-bit I2S format.
   * `R17` (`0x2301`): ALC Control 2.
-  * `R21` (`0x2A03`): ADC MUX Control (AIN selected).
+  * `R21` (`0x2A1F`): ADC MUX Control — **All 5 analog inputs enabled** (`$1F`), connecting VS1053b outputs on AIN3..5 to the master mixer.
   * `R22` (`0x2C07`): Output MUX Control — MX[2:0] = 111 (Bypass, Aux, DAC active).
   * `R13` (`0x1A00`): Power Down Control — all channels unmuted.
   * `R03` (`0x07F0`): Left DAC attenuation.
@@ -1353,20 +1422,25 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * `R01` (`0x036C`): Right Headphone volume.
 * **Audio Leveling:** In the `wb/play` audio engine, Jr2 mixer gains are calibrated so PSG and SID levels balance with the SAM2695 MIDI synth, and raw `.rsd` playback is attenuated ~8 dB relative to `.mus` synth files.
 
-### 9.6 Physical Status of VS1053b on Jr2 (Populated at 24.576 MHz)
+### 9.6 Physical Status of VS1053b on Jr2 (Populated at 12.288 MHz)
 * **Hardware Truth:** The VLSI Solution **VS1053b** audio codec / MP3 decoder is physically populated on the Wildbits Jr2 motherboard (confirmed by the official F256Jr2 Rev A hardware specification one-sheeter and the Nitrobotics portal).
-* **Jr2 Hardware Architecture:**
-  * **Master Clocking:** Driven at **24.576 MHz** on Jr2 (compared to 12.288 MHz on the K2).
-  * **Hardware Flow Control & Stream FIFO:** A 2,048-byte hardware SDI stream FIFO at `$FF57` buffers audio streaming data with hardware DREQ pacing.
+* **Jr2 Hardware Architecture (`v8_rc12` Baseline):**
+  * **Master Clocking:** Clocked at **12.288 MHz** (24.576 MHz ÷ 2, within 12–13 MHz boot spec).
+  * **FPGA Address Decode Fix:** In `v8_rc12`, the register offset decode was corrected (earlier cores passed the full `$5x` address, causing all writes to be ignored).
+  * **Hardware Flow Control & Stream FIFO:** A 2,048-byte hardware SDI stream FIFO at `$FF57` buffers audio streaming data with hardware DREQ pacing. Reading `$FF54` snapshots the 11-bit count for `$FF55`.
   * **Register Interface:** 16 SCI registers are accessible via index register `$FF51` and 16-bit data registers `$FF52–$FF53`.
+  * **Dual-Speed SPI:** Boot default is `IO_Clk / 16 = 1.57 MHz`; setting `CTRL` bit 2 (`VS_FAST`) restores `IO_Clk / 4 = 6.29 MHz` once the internal PLL clock multiplier is configured.
+  * **Reset:** `CTRL` bit 3 (`VS_RESET`) drives the physical VS1053b XRESET line low, flushes the SDI FIFO, and idles the bit engine.
+  * **PCB GPIO1 Strap & Workarounds:** Pin 34 (GPIO1) tied to VCC on one Jr2 PCB run puts the chip into real-time MIDI synth mode. Hardware fix is a solder bridge between pin 33 (GPIO0) and pin 34 (GPIO1), verified by `vs -i` reporting `GPIO0 = 1`. Software workaround is `/SYS/VSPLUGINS/switcher.plg` (`vs -o`).
   * **Interrupt:** Asserts `INT_MIDI_VS_RX` on Interrupt Group 3, bit 4 (`NEW_Rx_FIFO_MIDI_VS_Sync`).
-  * **Software Tooling:** The dedicated `vs` command tool in `/CMDS` on `l2_wildbitsjr2.dsk` provides file playback and hardware verification tests.
+  * **Software Tooling:** The dedicated `vs` command utility in `/CMDS` on `l2_wildbitsjr2.dsk` (**Edition 12**, 9,096 B) provides file playback (MP3, OGG, WAV, AAC, WMA, Format 0 MID) with automatic file-type clock scaling, built-in switcher patch deployment, and hardware verification tests.
 
 ### 9.7 Pre-Loaded BRAM Assets (Bannerfont & Default Palette)
 * **Hardware Truth:** Starting in `v8_rc10`, the FPGA BRAMs are pre-initialized with the official OS-9 Bannerfont and palette:
-  * **Bannerfont:** 2,048 bytes (256 characters × 8 rows) pre-loaded in both Font Sets 0 & 1 in `FONT_CPU_Memory` (4,096 bytes). Extracted directly as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.bin) and [`bannerfont.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/bannerfont.h).
-  * **Default Palette:** 64 bytes (16 colors × 4 bytes `[Blue, Green, Red, Alpha]`) pre-loaded in `TEXT_CLR_LUT`. Extracted directly as [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.bin) and [`os9_palette.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc11/os9_palette.h).
+  * **Bannerfont:** 2,048 bytes (256 characters × 8 rows) pre-loaded in both Font Sets 0 & 1 in `FONT_CPU_Memory` (4,096 bytes). Extracted directly as [`bannerfont.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/bannerfont.bin) and [`bannerfont.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/bannerfont.h).
+  * **Default Palette:** 64 bytes (16 colors × 4 bytes `[Blue, Green, Red, Alpha]`) pre-loaded in `TEXT_CLR_LUT`. Extracted directly as [`os9_palette.bin`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/os9_palette.bin) and [`os9_palette.h`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc12/os9_palette.h).
   * **Default Text Display:** Immediately at power-on, the text mode displays authentic NitrOS-9 Yellow (`#DDDD77`, Index 7) on Purple (`#FF7777`, Index 10) (`0x7A` attribute), eliminating the need for font/palette modules in bootfiles.
+  * **Firmware Verification (`wildbits_jr2_6809_v8_rc12.mcs`):** Binary comparison of `wildbits_jr2_6809_v8_rc12.mcs` against `v8_rc10` and `v8_rc11` confirms that the BRAM coe preloads (`mif/Font_OS9_bannerfont.coe` and `mif/Text_LUT_OS9_palette.coe`) are **100% byte-identical (unchanged)**. Therefore, the embedded `s_os9_bannerfont` (2,048 bytes) and `s_os9_palette` (64 bytes) assets in MAME [`src/mame/wildbits/wildbits_jr2.cpp`](file:///Users/richardlucente/development/git/mame/src/mame/wildbits/wildbits_jr2.cpp) are completely up-to-date and require no changes.
 
 ### 9.8 Summary Matrix of Authoritative Hardware Parity
 
@@ -1378,14 +1452,14 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **Tile Attributes** | Byte 1: `[7:HFlip, 6:VFlip, 5..4:Priority, 3..1:TileSet, 0:Palette]` | `TinyVKY2K2_IO_Page0_Devices.v` |
 | **Soft-SID Clock** | **1,022,727 Hz** (Commodore 64 NTSC pitch clock enable) | `CFP95139AJR2_Top.v` |
 | **Soft-PSG Clock** | **3,579,545 Hz** (NTSC colorburst pitch clock enable) | `CFP95139AJR2_Top.v` |
-| **WM8776 Init Words** | R23 (`0x2E00`), R10 (`0x1402`), R17 (`0x2301`), R21/R22 (`0x2A03`/`0x2C07`), R13 (`0x1A00`), R03/R04 (`0x07F0`/`0x09F0`), R00/R01 (`0x016C`/`0x036C`) | `level1/wildbits/modules/vtio.asm` |
-| **VS1053b Audio Decoder** | **Populated on Jr2** (24.576 MHz clock, 2KB SDI FIFO at `$FF57`, SCI at `$FF50–$FF53`) | F256Jr2 Rev A Spec Sheet & Nitrobotics Portal |
+| **WM8776 Init Words** | R23 (`0x2E00`), R10 (`0x1402`), R17 (`0x2301`), R21/R22 (`0x2A1F`/`0x2C07`), R13 (`0x1A00`), R03/R04 (`0x07F0`/`0x09F0`), R00/R01 (`0x016C`/`0x036C`) | `level1/wildbits/modules/vtio.asm` |
+| **VS1053b Audio Decoder** | **Populated on Jr2** (12.288 MHz clock, 2KB SDI FIFO at `$FF57`, SCI at `$FF50–$FF53`, fixed offset decode) | `wildbits-jr2-rc12-vs1053-bridge.md` |
 | **Cartridge Port (`$80–$9F`)** | **External Flash Cartridge Port** (`/c0` @ `$80`, `/c1` @ `$90`; no internal EXRAM) | `Wildbits OS-9 512K Physical Map.htm` & `rbmem` |
 | **Primary Keyboard** | **PS/2 Mini-DIN exclusively** (`$FE50–$FE54`; no optical keyboard or typematic) | `IRQ_Controller_Jr.v` & `keydrv.asm` |
 | **Network Interface** | **WizFi360 Wi-Fi only** (`$FF20–$FF29`; no W5100S/W6100 Ethernet) | `IRQ_Controller_Jr.v` & `wizfi.asm` |
 | **DIP Switches (`$FF90`)** | **Onboard 8-position DIP switch** (Bit 0: Turbo stretch mode ~1.4x, Bit 7: Gamma) | `Wildbits K2 Memory Atlas.htm` & F256Jr2 Specs |
-| **OS-9 Bannerfont** | 2,048 B pre-loaded in BRAM Font Sets 0 & 1 | `bannerfont.bin` / `Font_OS9_bannerfont.coe` |
-| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, Yellow on Purple) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
+| **OS-9 Bannerfont** | 2,048 B pre-loaded in BRAM Font Sets 0 & 1 (unchanged in `v8_rc12.mcs`) | `bannerfont.bin` / `Font_OS9_bannerfont.coe` |
+| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, Yellow on Purple, unchanged in `v8_rc12.mcs`) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
 
 ---
 
@@ -1396,30 +1470,30 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | Subsystem | Hardware Specification | Current Emulator Status | Verification & Functional Scope |
 | :--- | :--- | :--- | :--- |
 | **6809 CPU Core** | Motorola 6809 @ 6.29 MHz (FNX6809 core) | **Completed & Verified** | Verified NitrOS-9 Level 1 & Level 2 boot and task switching. |
-| **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`) | **Completed & Verified** | Edit-LUT decoding strictly targets `(mmu_mem_ctrl >> 4) & 0x03`. Cartridge Blocks `$80–$9F` decode to isolated cartridge memory. |
+| **MMU Subsystem** | 4x MLUTs, DAT banking, Constant RAM (`$FD00`), Vector RAM (`$FFF0`), `wb/flink_fix` | **Completed & Verified** | Edit-LUT decoding strictly targets `(mmu_mem_ctrl >> 4) & 0x03`. Cartridge Blocks `$80–$9F` decode to isolated cartridge memory. `wb/flink_fix` verified to prevent hiding module tails under `$FD00–$FFFF`. |
 | **System Reset (`wbreset`)** | Armed handshake (`$FE02=$DE`, `$FE03=$AD`, `$FE00=$80`) | **Completed & Verified** | Verified cold reboot to FEU. |
 | **Flash ROM & FEU** | 512KB visibility window (`f0.dsk` @ `$70000`, booter @ `$7A000`, `/f1` user flash) | **Completed & Verified** | Standalone Level 1 boot and `/f1` user flash access. |
 | **SPI SD Card** | SDC0 shift register (`$FE90-$FE91`), SDHC image boot | **Completed & Verified** | Verified Level 2 boot from `/s0`. SDC1 (`$FF00`) is unmapped (Planned). |
-| **16550 UART** | Serial registers `$FE60-$FE67`, BAUDCE 22.1184MHz clocking, Host TCP bridge | **Completed & Verified** | DriveWire host socket bridge (`127.0.0.1:65504`); `INT_UART` (Group 1 bit 0) asserted on RX data and IER enable. |
+| **16550 UART** | Serial registers `$FE60-$FE67`, BAUDCE 22.1184MHz clocking (divisor 5 = 230,400 baud), Host TCP bridge, DriveWire hardening (`wb/DriveWireCompatible`) | **Completed & Verified** | DriveWire host socket bridge (`127.0.0.1:65504`); `INT_UART` (Group 1 bit 0) asserted on RX data and IER enable. Hardened protocol verified (`rbdw` `$252`, `dwio_serial` `$37A`, bounded wait, `ReadAbort`, `PurgeRX` FCR reset). |
 | **Interrupt Controller**| 4 Groups × 8 sources (`IRQ_Controller_Jr.v`), W1C latches, mask/polarity/edge | **Completed & Verified** | All active Jr2 interrupt lines hooked up via `set_irq()` (Group 0 timers/video/PS2, Group 1 UART, Group 3 WizFi). |
 | **24-bit Timers** | Timer 0 (25.175 MHz dot clock) and Timer 1 (Frame) | **Completed & Verified** | Compares, values, status registers, and Group 0 IRQs verified. |
 | **TinyVicky Text Video**| 80x30 / 80x60, DBL_Y/X scaling, dual fonts, FG/BG CLUTs | **Completed & Verified** | Yellow on Purple authentic NitrOS-9 display. |
 | **Hardware Cursor** | TinyVicky cursor registers `$FFD0-$FFD7`, 30Hz blink | **Completed & Verified** | Inversion at cursor position verified. |
-| **PS/2 Keyboard & Mouse** | Host matrix to PS/2 Set 2 scan codes at `$FE50-$FE54` | **Completed & Verified** | Interactive typing and mouse packet FIFO verified. |
+| **PS/2 Keyboard & Mouse** | Host matrix to PS/2 Set 2 scan codes at `$FE50-$FE54`, relative mouse packet queue | **Completed & Verified** | Interactive typing and relative mouse packet FIFO verified. Host mouse capture, relative streaming, and cursor coordinate restoration verified (`wb/mouse_hide_unhide`). |
 | **Real-Time Clock (RTC)** | bq4802 RTC registers at `$FE40-$FE4F` | **Completed & Verified** | Correctly mapped at `$FE40-$FE4F` with bq4802 BCD register layout; verified NitrOS-9 `clock` driver date/time synchronization on boot. |
 | **Hardware DIP Switches** | Motherboard DIP switches at `$FF90` (Gamma, Turbo stretch ~1.4x, boot modes) | **Completed & Verified** | Mapped at `$FF90` and connected to MAME `DIPSW` input ports and `-bios` CLI options (`-bios turbo`, `-bios stock`). |
 | **WizFi360 Wi-Fi** | Dual 2KB FIFOs at `$FF20-$FF29`, WizCon4 multi-socket engine | **Completed & Verified** | Verified AT engine, WizCon4 4-socket telnet sessions, `INT_WIZFI_RX` (Group 3 bit 0), and `INT_WIZFI_TX` (Group 3 bit 5). |
-| **SAM2695 MIDI Synth** | Edition 2 register at `$FF30` (Tx/Rx empty, FIFO reset)| **Completed & Verified** | Aligned with `v8_rc11` FIFO status flags. |
-| **Built-in Font & Palette** | Embedded OS-9 Bannerfont and Palette in BRAM | **Completed & Verified** | Shows OS-9 font and palette from power-on. |
-| **Mouse Cursor Gating** | Pixel enable gated on `$FEA0` bit 0 | **Completed & Verified** | Eliminates orphaned cursor blocks on reset. |
+| **SAM2695 MIDI Synth** | Edition 2 register at `$FF30` (Tx/Rx empty, FIFO reset)| **Completed & Verified** | Aligned with `v8_rc11`+ FIFO status flags and software reset toggle. |
+| **Built-in Font & Palette** | Embedded OS-9 Bannerfont and Palette in BRAM | **Completed & Verified** | Shows OS-9 font and palette from power-on. Confirmed 100% byte-identical in `wildbits_jr2_6809_v8_rc12.mcs` (unchanged from rc10/rc11). |
+| **Mouse Cursor Gating** | Pixel enable gated on `$FEA0` bit 0 (`v8_rc11`+) | **Completed & Verified** | Eliminates orphaned cursor blocks on reset; unhides at exact previous coordinates without warping to right border (`wb/mouse_hide_unhide`). |
 | **Math Coprocessor** | Hardware 16x16 multiply, 32/16 divide, 32-bit addition at `$FEE0-$FEFB` | **Completed & Verified** | Verified via NitrOS-9 `mathtest` suite with saturation & divide-by-zero guards. |
 | **Raster Beam & Line IRQ** | TinyVicky `RAST_COL`/`RAST_ROW` and `LINE_CMP` interrupt (`INT_VKY_SOL`) | **Completed & Verified** | Verified via NitrOS-9 `beamtest` scanline monitor. |
 | **WDC 65C22 VIA 0** | VIA 0 at `$FEB0-$FEBF` driving Atari DE-9 joystick ports | *Planned* | Unmapped. |
-| **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) in Page `$C0` at `$1000-$1013` | *Planned* | Not yet rendered in `screen_update`. |
+| **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) in Page `$C0` at `$1000-$1013`, CLUT0–3 in Page `$C1`, layer compositing, Text Overlay | **Completed & Verified** | Verified 256-color linear row fetching, 2×2 upscaling (320×240 to 640×480), CLUT 0..3 color lookups (color index 0 transparent), `VKY_LAYER_CTRL_0/1` layer priority resolution, Text Overlay mode (`Mstr_Ctrl_Text_Overlay`, `$FFC0` bit 1), and Gamma correction. Verified with NitrOS-9 `shellbg` (loads 76KB 320×240 pixmap to BM2, CLUT2, Layer 2), `shellbgoff`, `gfxstatus`, and `drawtest` (interactive mouse drawing on BM0, CLUT0, Layer 0). |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling in Page `$C0` at `$1100-$1123` | *Planned* | Not yet rendered in `screen_update`. |
-| **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF` | *Planned* | Not yet rendered in `screen_update`. |
+| **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF` | *Planned* | Not yet rendered in `screen_update`. Test suites available: `sprtest128` (128-sprite testing) and `sprtest2` (Edition 2 big-endian). |
 | **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* | `$FEC0` is unmapped. |
-| **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* | MAME currently runs with `MACHINE_NO_SOUND_HW`. |
+| **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* (Revisit for Implementation) | MAME currently runs with `MACHINE_NO_SOUND_HW`. Revisit requirements updated for `v8_rc12`: VS1053b clocked at 12.288 MHz, fixed offset decode, dual SPI rate, 2KB FIFO at `$FF57`; WM8776 `InitCODEC` R21=`$1F` analog input muxing. |
 
 ### 10.2 Resolved Emulator Parity Revisions
 
@@ -1456,17 +1530,62 @@ The following core peripheral and memory mapping revisions have been implemented
    * Set `m_int_edge[0..3] = 0xFF` at reset in `machine_reset()` matching `IRQ_Controller_Jr.v` hardware edge-sensitive defaults.
 
 8. **Updated SAM2695 MIDI Register `$FF30` Edition 2**:
-   * Aligned `$FF30` status bits with `v8_rc11`: Bit 3 Tx-empty, Bit 2 Rx-empty, Bit 1 FIFO reset.
+   * Aligned `$FF30` status bits with `v8_rc11`+: Bit 3 Tx-empty, Bit 2 Rx-empty, Bit 1 FIFO reset.
 
 9. **Hybrid Clock Scaling & Hardware I/O Cycle-Stretching (`-bios turbo` / `-bios stock`)**:
-   * Implemented dynamic CPU clock scaling and peripheral wait-state insertion matching `v8_rc11` FPGA core behavior.
+   * Implemented dynamic CPU clock scaling and peripheral wait-state insertion matching `v8_rc11`+ FPGA core behavior.
    * In Turbo mode (`-bios turbo`), base CPU input clock scales to 35.245 MHz ($8.81125\text{ MHz}$ internal bus clock) for opcode fetches, RAM reads, and `TURBO_FASTWRITE` RAM writes, while `io_wait()` inserts wait states via `m_maincpu->eat_cycles()` during fixed peripheral I/O (`$FE00–$FFFF`) and RTC accesses (`$FE40–$FE4F`) to stretch bus frames from 24 ticks to the authentic 32-tick peripheral frame timing.
    * In Stock mode (`-bios stock`), the CPU operates unconditionally at 25.175 MHz ($6.29375\text{ MHz}$ internal bus clock) with zero wait states.
    * Verified against NitrOS-9 `wildspeed` (edition 3), reporting 8.81 MHz for RAM cycles, 6.30 MHz for peripheral I/O and RTC cycles, and 8.48 MHz perceived throughput (versus 6.29–6.30 MHz across all classes in stock mode).
 
 10. **Interactive PS/2 Mouse Input & Interrupt Integration**:
-   * Added MAME relative mouse input ports (`IPT_MOUSE_X`, `IPT_MOUSE_Y`, `IPT_BUTTON1`/`2`/`3` under `:MOUSEX`, `:MOUSEY`, `:MOUSE_BUTTONS`).
-   * Added `poll_mouse()` sampled at 60 Hz in `vblank_w()`, translating host relative movements and button state changes into standard 3-byte PS/2 stream packets (`[status/flags, dx, dy]`) pushed to `m_mouse_fifo`.
-   * Asserted `INT_PS2_MOUSE` (`Group 0, bit 3`) via `set_irq(0, 0x08)` on packet delivery, invoking NitrOS-9's `mousedrv_ps2` interrupt handler (`IRQMSvc`).
-   * NitrOS-9's driver consumes packets, updates hardware cursor registers `$FEA2-$FEA5` (`MS_XH`/`MS_XL`, `MS_YH`/`MS_YL`), resets the `vtio.asm` inactivity auto-hide timer (`V.MSTimer`), and keeps cursor visibility active (`MS_MEN = $01`).
-   * Verified: Cursor tracks host mouse movement smoothly, auto-hides after ~4 seconds of inactivity, and immediately wakes up and tracks coordinates upon subsequent host movement.
+    * Added MAME relative mouse input ports (`IPT_MOUSE_X`, `IPT_MOUSE_Y`, `IPT_BUTTON1`/`2`/`3` under `:MOUSEX`, `:MOUSEY`, `:MOUSE_BUTTONS`).
+    * Added `poll_mouse()` sampled at 60 Hz in `vblank_w()`, translating host relative movements and button state changes into standard 3-byte PS/2 stream packets (`[status/flags, dx, dy]`) pushed to `m_mouse_fifo`.
+    * Asserted `INT_PS2_MOUSE` (`Group 0, bit 3`) via `set_irq(0, 0x08)` on packet delivery, invoking NitrOS-9's `mousedrv_ps2` interrupt handler (`IRQMSvc`).
+    * NitrOS-9's driver consumes packets, updates hardware cursor registers `$FEA2-$FEA5` (`MS_XH`/`MS_XL`, `MS_YH`/`MS_YL`), resets the `vtio.asm` inactivity auto-hide timer (`V.MSTimer`), and keeps cursor visibility active (`MS_MEN = $01`).
+    * Verified: Cursor tracks host mouse movement smoothly, auto-hides after ~4 seconds of inactivity, and immediately wakes up and tracks coordinates upon subsequent host movement.
+
+11. **Host Mouse Window Integration & Cursor Suppression**:
+    * Captures relative host mouse motion during active MAME window focus and suppresses the host OS cursor over the emulated display area.
+    * Eliminates visual distraction and coordinate dissonance between the host desktop pointer and the TinyVicky emulated hardware cursor.
+    * Standard MAME UI keys (e.g. `Scroll Lock` for UI toggle, or opening the in-game menu) seamlessly release host cursor capture.
+
+12. **Fixed I/O Memory Inhibit (`RAM_Access_Inhibit`)**:
+    * Pre-installed open-bus read handlers (`io_wait(); return 0xff;`) and ignored write handlers (`io_wait();`) for `$FE00–$FEFF` and `$FF00–$FFEF` prior to active peripheral registrations in `wbjr2_mem()`.
+    * Enforces FPGA core `RAM_Access_Inhibit` parity: any probe or write to unmapped fixed I/O registers (such as unmapped VS1053b `$FF50–$FF57` or VIA0 `$FEB0–$FEBF`) operates safely as peripheral open-bus with cycle-stretching and cannot fall through to corrupt Slot 7 RAM/ROM.
+
+13. **SD Card Image Geometry & Host Padding Requirement**:
+    * MAME's generic `spi_sdcard` device requires raw disk image sector counts to be exact CSD-expressible capacities (multiples of 1024 sectors / 512 KB for SDHC).
+    * Distribution images formatted strictly to filesystem bounds—such as `parity_wildbits_jr2_v8_rc12/l2_wildbitsjr2.dsk` (262,134 sectors / 134,212,608 B, formatted via `os9 format -t29126 -ss -dd`)—are 10 sectors short of 128 MB (262,144 sectors).
+    * To avoid modifying generic MAME core devices outside the Wildbits Jr2 driver, disk images are padded to standard 128 MB card capacity via `truncate -s 128M <image.dsk>`. Once padded, the image mounts and boots seamlessly.
+
+14. **TinyVicky 256-Color Bitmaps (`BM0–BM2`) & Layer Compositing**:
+    * Implemented active bitmap rasterization in `screen_update()`:
+      * Linear 256-color row fetching from 24-bit physical SRAM addresses (`BMk_START_ADDY_H/M/L`).
+      * 2×2 pixel upscaling from 320×240 (60 Hz) or 320×200 (70 Hz) to the 640×480 screen.
+      * Graphics CLUT 0..3 color lookups from Page `$C1` (`$1000`, `$1400`, `$1800`, `$1C00`), treating color index 0 as transparent.
+      * Layer priority resolution (Layer 0 $\rightarrow$ Layer 1 $\rightarrow$ Layer 2) using `VKY_LAYER_CTRL_0` (`$FFC2`) and `VKY_LAYER_CTRL_1` (`$FFC3`).
+      * Text Overlay mode (`Mstr_Ctrl_Text_Overlay`, `$FFC0` bit 1): when set, character cell background pixels are ignored/transparent, allowing underlying bitmaps to show through behind console text.
+      * Blank video on `Disable_Vid` (`$FFC0` bit 7) and optional Gamma correction LUT lookups on `GAMMA_En` (`$FFC0` bit 6).
+    * Verified with NitrOS-9 Level 2:
+      * `shellbg`: Allocates BM2 via `SS.AScrn`, defines CLUT2 with `clutgrid` via `SS.DfPal`, assigns CLUT2 to BM2 via `SS.Palet`, positions BM2 on Layer 2 via `SS.PScrn`, streams 76,800 bytes of `pixmapgrid` into SRAM, and turns on graphics and text overlay (`FFC0 = $0F`).
+      * `shellbgoff`: Reverts `$FFC0` to text-only mode (`$01`) and frees BM2 framebuffer via `SS.FScrn`.
+      * `gfxstatus`: Confirms register state transitions (`BM02 Enabled`, `CLUT 02`, `FFC0: 0F BM GRF OVRLY TXT`, `FFC3: 02 2=BM0`).
+      * `drawtest`: Interactive mouse drawing on BM0 (`$1000`), CLUT 0 (`$1000` in Page `$C1`), and Layer 0 (`$FFC2 = $00`). Clears canvas with 'c' and cleanly returns to text console on 'q'.
+
+---
+
+### 10.3 Completed & Verified Features: rc12 Revisit & Action Analysis
+
+Based on the release of firmware core **`wildbits_jr2_6809_v8_rc12`** and the accompanying Nitrobotics updates, each completed and verified subsystem has been audited to determine its current status and required actions:
+
+| Subsystem | rc12 Hardware / Software Change | Status in MAME Emulator | Required Action / Analysis |
+| :--- | :--- | :--- | :--- |
+| **VS1053b MP3 Decoder** | Clock divided to **12.288 MHz** (was 24.576 MHz); fixed register offset decoding bug at `$FF50–$FF57`; dual-speed SPI (1.57 / 6.29 MHz); GPIO1 boot strap workaround via `switcher.plg` and `vs` Edition 12. | *Planned* (`MACHINE_NO_SOUND_HW`) | **Must be revisited before implementation:** MAME device model must adopt 12.288 MHz clocking (not 24.576 MHz), implement fixed register offset decode at `$FF50–$FF57`, latch 11-bit FIFO count on `$FF54` read for `$FF55`, and handle `CTRL` bit 3 (`VS_RESET`). |
+| **WM8776 Audio CODEC** | `vtio` InitCODEC now writes R21 = `$2A1F` (`$1F`), unmasking all 5 analog inputs so VS1053 outputs on AIN3..5 reach the mixer. | *Planned* (`MACHINE_NO_SOUND_HW`) | **Must be revisited before implementation:** Ensure AIN3..5 are routed from VS1053b audio outputs into the WM8776 master mixing bus. |
+| **16550 UART / DriveWire** | Hardened driver stack (`wb/DriveWireCompatible`, `rbdw` `$252`, `dwio_serial` `$37A`): bounded transmit wait, `ReadAbort` error framing, `PurgeRX` with FCR RX-FIFO reset, trailing-byte check on status OK. | **Completed & Verified** | **Revisited & Verified:** MAME UART emulation supports exact divisor 5 (230,400 baud) and handles FCR bit 1 FIFO clearing. Tested against pyDriveWire / DW4 server with zero frame slipping or lockups. |
+| **PS/2 Mouse & Cursor** | Hardware pixel gating on `$FEA0` bit 0; cursor unhiding restores previous coordinates instead of resetting to right border (`wb/mouse_hide_unhide`). | **Completed & Verified** | **Revisited & Verified:** MAME relative mouse input handler (`poll_mouse()`) and host cursor suppression fully align with `wb/mouse_hide_unhide` coordinate restoration. |
+| **Built-in Font & Palette** | Embedded BRAM assets in `mif/Font_OS9_bannerfont.coe` and `mif/Text_LUT_OS9_palette.coe`. | **Completed & Verified** | **Revisited & Confirmed Unchanged:** Binary analysis of `wildbits_jr2_6809_v8_rc12.mcs` confirms that BRAM preloads are **100% byte-identical** to rc10 and rc11. The embedded `s_os9_bannerfont` (2,048 B) and `s_os9_palette` (64 B) in `wildbits_jr2.cpp` require **no changes**. |
+| **MMU Subsystem** | `wb/flink_fix` prevents modules >= `$1D00` from mapping into Slot 7, accommodating the 3-page ($300 bytes) fixed I/O space at `$FD00–$FFFF`. | **Completed & Verified** | **Revisited & Verified:** MAME's MMU translation correctly maintains fixed decodes at `$FD00–$FFFF` and runs NitrOS-9 modules with the 3-page clearance. |
+| **TinyVicky Sprites** | `sprtest128` test suite added in `wb/nitrobotics`; `sprtest2` (Edition 2) verified with big-endian coordinates and 16-bit word-aligned pixel buffers. | *Planned* | **Revisited for Roadmap:** When implementing sprite compositing in `tinyvicky_device`, `sprtest128` provides an immediate verification suite for all 128 hardware sprites and line-buffer blanking constraints. |
+| **Timing Closure & Video** | rc12 adds the K2 waiver for the hold path from the video-mode resynchronizer into the 25 MHz video clock; WNS closes at +0.188 ns, WHS at +0.029 ns. | **Completed & Verified** | **Revisited & Confirmed:** Timing closure fixes are internal FPGA constraints; MAME emulation continues to render 60 Hz / 70 Hz text smoothly. |

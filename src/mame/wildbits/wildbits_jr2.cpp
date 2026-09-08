@@ -7,7 +7,7 @@
     The Wildbits Jr2 (formerly Foenix F256 Jr2) is an FPGA-based retro
     system powered by an Artix-7 FPGA running the FNX6809 soft core,
     TinyVicky II graphics, 512KB SRAM, 512KB Flash ROM, and integrated
-    peripherals.
+    peripherals. Aligned with hardware baseline wildbits_jr2_6809_v8_rc12.
 
 ****************************************************************************/
 
@@ -2027,6 +2027,15 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 	map(0xe000, 0xffff).bankr("bank7").bankw("bank7");
 
 	// Overlays in Slot 7 ($E000-$FFFF):
+	// Fixed I/O Windows ($FE00-$FEFF and $FF00-$FFEF):
+	// On hardware, RAM_Access_Inhibit in the FPGA overrides Slot 7 MMU translation across these windows.
+	// Any unmapped locations within fixed I/O space return open-bus ($FF), ignore writes,
+	// and execute peripheral cycle-stretching (io_wait()), preventing unintended fall-through to bank7.
+	map(0xfe00, 0xfeff).lr8(NAME([this](offs_t offset) -> uint8_t { io_wait(); return 0xff; }))
+	                   .lw8(NAME([this](offs_t offset, uint8_t data) { io_wait(); }));
+	map(0xff00, 0xffef).lr8(NAME([this](offs_t offset) -> uint8_t { io_wait(); return 0xff; }))
+	                   .lw8(NAME([this](offs_t offset, uint8_t data) { io_wait(); }));
+
 	// $FD00-$FDFF: Constant RAM for OS-9 Level 2 (when enabled in MMU_IO_CTRL bit 0)
 	map(0xfd00, 0xfdff).lr8(NAME([this](offs_t offset) -> uint8_t {
 		if (m_mmu_io_ctrl & 0x01)
@@ -2119,8 +2128,21 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 
 uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	// TinyVicky master video enable check
+	// TinyVicky master video blank check
+	if (m_vky_mstr_ctrl_0 & 0x80) // Disable_Vid: blank video output
+	{
+		bitmap.fill(rgb_t(0, 0, 0), cliprect);
+		return 0;
+	}
+
+	// TinyVicky master video enables
 	bool text_en = (m_vky_mstr_ctrl_0 & 0x01) != 0;
+	bool text_overlay = (m_vky_mstr_ctrl_0 & 0x02) != 0;
+	bool graph_en = (m_vky_mstr_ctrl_0 & 0x04) != 0;
+	bool bitmap_en = (m_vky_mstr_ctrl_0 & 0x08) != 0;
+	bool gamma_en = (m_vky_mstr_ctrl_0 & 0x40) != 0;
+
+	bool clk_70 = (m_vky_mstr_ctrl_1 & 0x01) != 0;
 	bool font_set1 = (m_vky_mstr_ctrl_1 & 0x20) != 0;
 	uint16_t font_base = font_set1 ? 0x0800 : 0x0000;
 
@@ -2128,11 +2150,121 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 	rgb_t bg_clear(m_vky_bg_r, m_vky_bg_g, m_vky_bg_b);
 	bitmap.fill(bg_clear, cliprect);
 
+	// Render TinyVicky 256-color Bitmap planes (BM0, BM1, BM2)
+	if (graph_en && bitmap_en)
+	{
+		// Determine layer composite order (Layer 0 = back, Layer 1 = middle, Layer 2 = front)
+		int layer_planes[3];
+		layer_planes[0] = m_vky_layer_ctrl_0 & 0x0f;
+		layer_planes[1] = (m_vky_layer_ctrl_0 >> 4) & 0x0f;
+		layer_planes[2] = m_vky_layer_ctrl_1 & 0x0f;
+
+		std::vector<int> planes_to_render;
+		if (m_vky_layer_ctrl_0 != 0 || m_vky_layer_ctrl_1 != 0)
+		{
+			for (int i = 0; i < 3; i++)
+			{
+				if (layer_planes[i] <= 2 && std::find(planes_to_render.begin(), planes_to_render.end(), layer_planes[i]) == planes_to_render.end())
+				{
+					planes_to_render.push_back(layer_planes[i]);
+				}
+			}
+			for (int p = 0; p < 3; p++)
+			{
+				uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
+				if ((ctrl & 0x01) && std::find(planes_to_render.begin(), planes_to_render.end(), p) == planes_to_render.end())
+				{
+					planes_to_render.push_back(p);
+				}
+			}
+		}
+		else
+		{
+			for (int p = 0; p < 3; p++)
+			{
+				uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
+				if (ctrl & 0x01)
+					planes_to_render.push_back(p);
+			}
+		}
+
+		int bm_w = 320;
+		int bm_h = clk_70 ? 200 : 240;
+
+		for (int p : planes_to_render)
+		{
+			uint16_t reg_base = 0x1000 + p * 8;
+			uint8_t bm_ctrl = m_vram_c0[reg_base + 0];
+			if (!(bm_ctrl & 0x01))
+				continue;
+
+			uint8_t clut_idx = (bm_ctrl >> 1) & 0x03;
+			uint16_t clut_base = 0x1000 + clut_idx * 0x0400;
+
+			uint32_t start_addr = ((uint32_t)m_vram_c0[reg_base + 1] << 16) |
+			                      ((uint32_t)m_vram_c0[reg_base + 2] << 8) |
+			                      m_vram_c0[reg_base + 3];
+
+			for (int by = 0; by < bm_h; by++)
+			{
+				int sy0 = by * 2;
+				int sy1 = by * 2 + 1;
+				if (sy0 > cliprect.max_y || sy1 < cliprect.min_y)
+					continue;
+
+				uint32_t row_addr = start_addr + by * bm_w;
+				if (row_addr >= 0x080000)
+					continue;
+
+				const uint8_t *src_row = &m_ram[row_addr];
+
+				for (int bx = 0; bx < bm_w; bx++)
+				{
+					uint8_t color_idx = src_row[bx];
+					if (color_idx == 0)
+						continue; // Transparent pixel
+
+					uint16_t entry_offset = clut_base + color_idx * 4;
+					uint8_t b = m_vram_c1[entry_offset + 0];
+					uint8_t g = m_vram_c1[entry_offset + 1];
+					uint8_t r = m_vram_c1[entry_offset + 2];
+
+					if (gamma_en)
+					{
+						b = m_vram_c0[0x0000 + b];
+						g = m_vram_c0[0x0400 + g];
+						r = m_vram_c0[0x0800 + r];
+					}
+
+					rgb_t pen(r, g, b);
+
+					int sx0 = bx * 2;
+					int sx1 = bx * 2 + 1;
+
+					if (sy0 >= cliprect.min_y && sy0 <= cliprect.max_y)
+					{
+						if (sx0 >= cliprect.min_x && sx0 <= cliprect.max_x)
+							bitmap.pix(sy0, sx0) = pen;
+						if (sx1 >= cliprect.min_x && sx1 <= cliprect.max_x)
+							bitmap.pix(sy0, sx1) = pen;
+					}
+					if (sy1 >= cliprect.min_y && sy1 <= cliprect.max_y)
+					{
+						if (sx0 >= cliprect.min_x && sx0 <= cliprect.max_x)
+							bitmap.pix(sy1, sx0) = pen;
+						if (sx1 >= cliprect.min_x && sx1 <= cliprect.max_x)
+							bitmap.pix(sy1, sx1) = pen;
+					}
+				}
+			}
+		}
+	}
+
+	// Render Text Mode
 	if (text_en)
 	{
 		bool dbl_x = (m_vky_mstr_ctrl_1 & 0x02) != 0;
 		bool dbl_y = (m_vky_mstr_ctrl_1 & 0x04) != 0;
-		bool clk_70 = (m_vky_mstr_ctrl_1 & 0x01) != 0;
 
 		const int cell_w = dbl_x ? 16 : 8;
 		const int cell_h = dbl_y ? 16 : 8;
@@ -2158,11 +2290,23 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				uint8_t fg_b = m_vram_c0[0x1700 + fg_idx * 4 + 0];
 				uint8_t fg_g = m_vram_c0[0x1700 + fg_idx * 4 + 1];
 				uint8_t fg_r = m_vram_c0[0x1700 + fg_idx * 4 + 2];
+				if (gamma_en)
+				{
+					fg_b = m_vram_c0[0x0000 + fg_b];
+					fg_g = m_vram_c0[0x0400 + fg_g];
+					fg_r = m_vram_c0[0x0800 + fg_r];
+				}
 				rgb_t fg_pen(fg_r, fg_g, fg_b);
 
 				uint8_t bg_b = m_vram_c0[0x1740 + bg_idx * 4 + 0];
 				uint8_t bg_g = m_vram_c0[0x1740 + bg_idx * 4 + 1];
 				uint8_t bg_r = m_vram_c0[0x1740 + bg_idx * 4 + 2];
+				if (gamma_en)
+				{
+					bg_b = m_vram_c0[0x0000 + bg_b];
+					bg_g = m_vram_c0[0x0400 + bg_g];
+					bg_r = m_vram_c0[0x0800 + bg_r];
+				}
 				rgb_t bg_pen(bg_r, bg_g, bg_b);
 
 				// Render character cell
@@ -2182,13 +2326,27 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 
 						for (int cx = 0; cx < 8; cx++)
 						{
-							rgb_t pen = (glyph_row & (0x80 >> cx)) ? fg_pen : bg_pen;
-							for (int dx = 0; dx < x_scale; dx++)
+							bool is_fg = (glyph_row & (0x80 >> cx)) != 0;
+							if (is_fg)
 							{
-								int px = col * cell_w + cx * x_scale + dx;
-								if (px >= cliprect.min_x && px <= cliprect.max_x)
+								for (int dx = 0; dx < x_scale; dx++)
 								{
-									dest[cx * x_scale + dx] = pen;
+									int px = col * cell_w + cx * x_scale + dx;
+									if (px >= cliprect.min_x && px <= cliprect.max_x)
+									{
+										dest[cx * x_scale + dx] = fg_pen;
+									}
+								}
+							}
+							else if (!text_overlay)
+							{
+								for (int dx = 0; dx < x_scale; dx++)
+								{
+									int px = col * cell_w + cx * x_scale + dx;
+									if (px >= cliprect.min_x && px <= cliprect.max_x)
+									{
+										dest[cx * x_scale + dx] = bg_pen;
+									}
 								}
 							}
 						}
@@ -2197,7 +2355,7 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 			}
 		}
 
-		// Render TinyVicky hardware cursor
+		// Render TinyVicky hardware text cursor
 		if (m_vky_crsr_ctrl & 0x01)
 		{
 			bool blink = (m_vky_crsr_ctrl & 0x02) ? (((m_frame_count / 16) & 1) == 0) : true;
