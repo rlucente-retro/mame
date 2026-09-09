@@ -1492,7 +1492,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) in Page `$C0` at `$1000-$1013`, CLUT0–3 in Page `$C1`, layer compositing, Text Overlay | **Completed & Verified** | Verified 256-color linear row fetching, 2×2 upscaling (320×240 to 640×480), CLUT 0..3 color lookups (color index 0 transparent), `VKY_LAYER_CTRL_0/1` layer priority resolution, Text Overlay mode (`Mstr_Ctrl_Text_Overlay`, `$FFC0` bit 1), and Gamma correction. Verified with NitrOS-9 `shellbg` (loads 76KB 320×240 pixmap to BM2, CLUT2, Layer 2), `shellbgoff`, `gfxstatus`, and `drawtest` (interactive mouse drawing on BM0, CLUT0, Layer 0). |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling in Page `$C0` at `$1100-$1123` | **Completed & Verified** | Verified 3 tilemap planes (TL0..TL2), 8 tile sets (TS0..TS7, linear and square grid modes), 8x8 and 16x16 tile sizes, tile attributes (H/V flip, priority, tile set select, palette offset), 2x2 upscaling, CLUT 0..3 selection, fine X/Y smooth scrolling, and dynamic layer mapping via `VKY_LAYER_CTRL_0/1`. Verified with NitrOS-9 `tltest` (20x15 scrolling matrix, TS0 pattern, CLUT 0). |
 | **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF`, CLUT 0..3 selection, 4-level layer depth interleaving | **Completed & Verified** | Verified 128 sprite records (8 bytes each, big-endian), variable dimensions (8×8, 16×16, 24×24, 32×32), 32-pixel off-screen coordinate margin, Graphics CLUT 0..3 palette lookups (color index 0 transparent), priority ordering (127 down to 0; sprite 0 on top), and 4-level sprite interleaving depth (`SPRITE_DEPTH` 0..3) across graphics layers. Verified with NitrOS-9 `sprtest2` (two 16×16 bouncing sprites with LUT0 ramp). |
-| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | *Planned* | `$FEC0` is unmapped. |
+| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | **Completed & Verified** | Verified 1D linear copy and fill across 2 MB physical memory, 2D rectangular blit and fill with independent source and destination row strides (pitch), cycle-accurate bus pausing, and completion interrupt assertion (`INT_DMA0` on Group 0, bit 6 at `$FE20`). Verified with NitrOS-9 `dmatest` suite (5/5 tests passing). |
 | **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* (Revisit for Implementation) | MAME currently runs with `MACHINE_NO_SOUND_HW`. Revisit requirements updated for `v8_rc12`: VS1053b clocked at 12.288 MHz, fixed offset decode, dual SPI rate, 2KB FIFO at `$FF57`; WM8776 `InitCODEC` R21=`$1F` analog input muxing. |
 
 ### 10.2 Resolved Emulator Parity Revisions
@@ -1592,9 +1592,21 @@ The following core peripheral and memory mapping revisions have been implemented
       * Renders tile pixels row-by-row with virtual playfield wrapping in X and Y, 2×2 upscaling to the 640×480 screen raster, CLUT 0..3 color lookups (color index 0 transparent), and optional Gamma correction LUT.
       * Integrated into the 3-layer compositing pipeline via `render_layer_plane(4..6)`, seamlessly interleaving with bitmaps and 4-depth hardware sprites.
       * Supports both Little-Endian and Big-Endian register layouts to maintain compatibility across firmware and NitrOS-9 software definitions.
-    * Verified with NitrOS-9 `tltest`:
-      * Configured 20×15 cell map on TL0, Layer 0 (`VKY_LAYER_CTRL_0 = $04`), Graphics CLUT 0, Tile Set 0 in SRAM.
-      * Rendered alternating checkerboard pattern of Tile 1 (cyan box with red border) and Tile 2 (grey lattice on red) smoothly scrolling behind NitrOS-9 console text overlay.
+17. **TinyVicky Direct Memory Access (DMA) Engine (`$FEC0–$FED7`)**:
+    * Implemented full hardware DMA engine supporting 1D linear and 2D rectangular transfers:
+      * Decoded register block at `$FEC0–$FED7`: `DMA_CTRL_REG` (`$FEC0`), `DMA_STATUS_REG` / `DMA_DATA_2_WRITE` (`$FEC1`), 24-bit physical source start address (`$FEC4–$FEC6`), 24-bit physical destination start address (`$FEC8–$FECA`), 24-bit 1D size (`$FECD–$FECF`), 16-bit 2D width/height (`$FED0–$FED3`), and 16-bit source/destination row strides (`$FED4–$FED7`).
+      * 1D Linear Mode: transfers linear byte blocks (copy or constant fill) across SRAM, Cartridge ROM, and TinyVicky VRAM pages (`$C0–$C4`).
+      * 2D Rectangular Mode: blits or fills rectangular blocks with independent source stride and destination stride (pitch), allowing blits directly to/from stride-based graphical framebuffers or tile matrix buffers.
+      * Hardware Bus Cycle Stretching: simulates hardware-intrusive DMA timing by calling `m_maincpu->eat_cycles()` (~100 MB/s fill, ~33 MB/s copy at 6.29 MHz).
+      * Completion Interrupt: asserts `INT_DMA0` (Interrupt Group 0, bit 6 at `$FE20`) upon transfer conclusion when `Int_En` (`$FEC0` bit 3) is set.
+      * MAME state saving and reset defaults registered for all 20 internal registers.
+    * Verified with NitrOS-9 `dmatest`:
+      * Test 1: 1D Linear Fill (256 bytes with `$5A`).
+      * Test 2: 1D Linear Copy (256 bytes ramp pattern `$00..$FF`).
+      * Test 3: 2D Rectangular Block Copy (16×16 block in 32-byte pitch canvas with stride preservation).
+      * Test 4: 2D Rectangular Block Fill (8×8 box with `$C3` in 32-byte pitch canvas).
+      * Test 5: Completion Interrupt Assertion and clearing via `INT_PENDING_0` (`$FE20` bit 6).
+      * Results: All 5 tests passed cleanly with exit status 0.
 
 ---
 
@@ -1604,6 +1616,7 @@ Based on the release of firmware core **`wildbits_jr2_6809_v8_rc12`** and the ac
 
 | Subsystem | rc12 Hardware / Software Change | Status in MAME Emulator | Required Action / Analysis |
 | :--- | :--- | :--- | :--- |
+| **TinyVicky DMA Controller** | Hardware 1D/2D DMA engine at `$FEC0–$FED7` with source/dest strides and completion IRQ (`INT_DMA0` on Group 0 bit 6). | **Completed & Verified** | **Completed & Verified:** Full 1D copy/fill, 2D copy/fill with strides, bus pausing, and interrupt generation verified with NitrOS-9 `dmatest` (5/5 tests passing). |
 | **VS1053b MP3 Decoder** | Clock divided to **12.288 MHz** (was 24.576 MHz); fixed register offset decoding bug at `$FF50–$FF57`; dual-speed SPI (1.57 / 6.29 MHz); GPIO1 boot strap workaround via `switcher.plg` and `vs` Edition 12. | *Planned* (`MACHINE_NO_SOUND_HW`) | **Must be revisited before implementation:** MAME device model must adopt 12.288 MHz clocking (not 24.576 MHz), implement fixed register offset decode at `$FF50–$FF57`, latch 11-bit FIFO count on `$FF54` read for `$FF55`, and handle `CTRL` bit 3 (`VS_RESET`). |
 | **WM8776 Audio CODEC** | `vtio` InitCODEC now writes R21 = `$2A1F` (`$1F`), unmasking all 5 analog inputs so VS1053 outputs on AIN3..5 reach the mixer. | *Planned* (`MACHINE_NO_SOUND_HW`) | **Must be revisited before implementation:** Ensure AIN3..5 are routed from VS1053b audio outputs into the WM8776 master mixing bus. |
 | **16550 UART / DriveWire** | Hardened driver stack (`wb/DriveWireCompatible`, `rbdw` `$252`, `dwio_serial` `$37A`): bounded transmit wait, `ReadAbort` error framing, `PurgeRX` with FCR RX-FIFO reset, trailing-byte check on status OK. | **Completed & Verified** | **Revisited & Verified:** MAME UART emulation supports exact divisor 5 (230,400 baud) and handles FCR bit 1 FIFO clearing. Tested against pyDriveWire / DW4 server with zero frame slipping or lockups. |

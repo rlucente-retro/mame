@@ -276,6 +276,13 @@ private:
 	uint8_t math_r(offs_t offset);
 	void math_w(offs_t offset, uint8_t data);
 
+	// TinyVicky Direct Memory Access (DMA) Controller ($FEC0 - $FEDF)
+	uint8_t dma_r(offs_t offset);
+	void dma_w(offs_t offset, uint8_t data);
+	void dma_execute();
+	uint8_t dma_read_byte(uint32_t phys_addr);
+	void dma_write_byte(uint32_t phys_addr, uint8_t data);
+
 	// TinyVicky Video handlers ($FFC0 - $FFDF)
 	uint8_t vky_r(offs_t offset);
 	void vky_w(offs_t offset, uint8_t data);
@@ -405,6 +412,28 @@ private:
 	uint16_t m_math_divu_num;
 	uint32_t m_math_add_a;
 	uint32_t m_math_add_b;
+
+	// TinyVicky Direct Memory Access (DMA) Controller ($FEC0 - $FEDF)
+	uint8_t m_dma_ctrl;
+	uint8_t m_dma_status;
+	uint8_t m_dma_fill_data;
+	uint8_t m_dma_src_h;
+	uint8_t m_dma_src_m;
+	uint8_t m_dma_src_l;
+	uint8_t m_dma_dst_h;
+	uint8_t m_dma_dst_m;
+	uint8_t m_dma_dst_l;
+	uint8_t m_dma_size_1d_h;
+	uint8_t m_dma_size_1d_m;
+	uint8_t m_dma_size_1d_l;
+	uint8_t m_dma_size_x_h;
+	uint8_t m_dma_size_x_l;
+	uint8_t m_dma_size_y_h;
+	uint8_t m_dma_size_y_l;
+	uint8_t m_dma_src_stride_h;
+	uint8_t m_dma_src_stride_l;
+	uint8_t m_dma_dst_stride_h;
+	uint8_t m_dma_dst_stride_l;
 
 	// TinyVicky Master Registers
 	uint8_t m_vky_mstr_ctrl_0;
@@ -1832,6 +1861,199 @@ void wildbits_jr2_state::math_w(offs_t offset, uint8_t data)
 	}
 }
 
+// TinyVicky Direct Memory Access (DMA) Controller ($FEC0 - $FEDF)
+uint8_t wildbits_jr2_state::dma_read_byte(uint32_t phys_addr)
+{
+	phys_addr &= 0x1fffff;
+	uint8_t block = (phys_addr >> 13) & 0xff;
+	uint16_t offset = phys_addr & 0x1fff;
+	return get_physical_block_ptr(block)[offset];
+}
+
+void wildbits_jr2_state::dma_write_byte(uint32_t phys_addr, uint8_t data)
+{
+	phys_addr &= 0x1fffff;
+	uint8_t block = (phys_addr >> 13) & 0xff;
+	uint16_t offset = phys_addr & 0x1fff;
+	if (block < 0x40)
+	{
+		m_ram[(block & 0x3f) * 0x2000 + offset] = data;
+	}
+	else if (block >= 0x80 && block < 0xa0)
+	{
+		m_cart[(block - 0x80) * 0x2000 + offset] = data;
+	}
+	else if (block == 0xc0)
+	{
+		m_vram_c0[offset] = data;
+	}
+	else if (block == 0xc1)
+	{
+		m_vram_c1[offset] = data;
+	}
+	else if (block == 0xc2)
+	{
+		m_vram_c2[offset] = data;
+	}
+	else if (block == 0xc3)
+	{
+		m_vram_c3[offset] = data;
+	}
+	else if (block == 0xc4)
+	{
+		m_vram_c4[offset] = data;
+	}
+}
+
+void wildbits_jr2_state::dma_execute()
+{
+	bool is_2d = (m_dma_ctrl & 0x02) != 0;
+	bool is_fill = (m_dma_ctrl & 0x04) != 0;
+	bool int_en = (m_dma_ctrl & 0x08) != 0;
+
+	uint32_t src = ((uint32_t)m_dma_src_h << 16) | ((uint32_t)m_dma_src_m << 8) | m_dma_src_l;
+	uint32_t dst = ((uint32_t)m_dma_dst_h << 16) | ((uint32_t)m_dma_dst_m << 8) | m_dma_dst_l;
+
+	m_dma_status = 0x80; // Transfer in progress
+
+	int cycles = 0;
+
+	if (!is_2d)
+	{
+		// 1D Linear Transfer
+		uint32_t count = ((uint32_t)m_dma_size_1d_h << 16) | ((uint32_t)m_dma_size_1d_m << 8) | m_dma_size_1d_l;
+		if (count > 0)
+		{
+			if (is_fill)
+			{
+				for (uint32_t i = 0; i < count; i++)
+				{
+					dma_write_byte((dst + i) & 0x1fffff, m_dma_fill_data);
+				}
+				cycles = count / 16; // ~100MB/s at 6.29MHz
+			}
+			else
+			{
+				for (uint32_t i = 0; i < count; i++)
+				{
+					uint8_t byte = dma_read_byte((src + i) & 0x1fffff);
+					dma_write_byte((dst + i) & 0x1fffff, byte);
+				}
+				cycles = count / 5; // ~33MB/s at 6.29MHz
+			}
+		}
+	}
+	else
+	{
+		// 2D Rectangular Block Transfer
+		uint16_t width = ((uint16_t)m_dma_size_x_h << 8) | m_dma_size_x_l;
+		uint16_t height = ((uint16_t)m_dma_size_y_h << 8) | m_dma_size_y_l;
+		uint16_t src_stride = ((uint16_t)m_dma_src_stride_h << 8) | m_dma_src_stride_l;
+		uint16_t dst_stride = ((uint16_t)m_dma_dst_stride_h << 8) | m_dma_dst_stride_l;
+
+		for (uint16_t y = 0; y < height; y++)
+		{
+			uint32_t row_src = (src + (uint32_t)y * src_stride) & 0x1fffff;
+			uint32_t row_dst = (dst + (uint32_t)y * dst_stride) & 0x1fffff;
+
+			if (is_fill)
+			{
+				for (uint16_t x = 0; x < width; x++)
+				{
+					dma_write_byte((row_dst + x) & 0x1fffff, m_dma_fill_data);
+				}
+			}
+			else
+			{
+				for (uint16_t x = 0; x < width; x++)
+				{
+					uint8_t byte = dma_read_byte((row_src + x) & 0x1fffff);
+					dma_write_byte((row_dst + x) & 0x1fffff, byte);
+				}
+			}
+		}
+
+		uint32_t total_bytes = (uint32_t)width * height;
+		cycles = is_fill ? (total_bytes / 16) : (total_bytes / 5);
+	}
+
+	if (cycles > 0)
+	{
+		m_maincpu->eat_cycles(cycles);
+	}
+
+	m_dma_status = 0x00; // Transfer complete
+
+	if (int_en)
+	{
+		set_irq(0, 0x40); // INT_DMA0 (Group 0, bit 6)
+	}
+}
+
+uint8_t wildbits_jr2_state::dma_r(offs_t offset)
+{
+	io_wait();
+	switch (offset)
+	{
+	case 0x00: return m_dma_ctrl & 0x0f; // Start_Trf is write-only, reads as 0
+	case 0x01: return m_dma_status;      // Bit 7: TRF_IP
+	case 0x04: return m_dma_src_h;
+	case 0x05: return m_dma_src_m;
+	case 0x06: return m_dma_src_l;
+	case 0x08: return m_dma_dst_h;
+	case 0x09: return m_dma_dst_m;
+	case 0x0a: return m_dma_dst_l;
+	case 0x0d: return m_dma_size_1d_h;
+	case 0x0e: return m_dma_size_1d_m;
+	case 0x0f: return m_dma_size_1d_l;
+	case 0x10: return m_dma_size_x_h;
+	case 0x11: return m_dma_size_x_l;
+	case 0x12: return m_dma_size_y_h;
+	case 0x13: return m_dma_size_y_l;
+	case 0x14: return m_dma_src_stride_h;
+	case 0x15: return m_dma_src_stride_l;
+	case 0x16: return m_dma_dst_stride_h;
+	case 0x17: return m_dma_dst_stride_l;
+	default: return 0x00;
+	}
+}
+
+void wildbits_jr2_state::dma_w(offs_t offset, uint8_t data)
+{
+	io_wait();
+	switch (offset)
+	{
+	case 0x00: // DMA_CTRL_REG
+		m_dma_ctrl = data & 0x0f; // Enable, 1D/2D, Fill, Int_En
+		if ((data & 0x80) && ((data & 0x01) || (m_dma_ctrl & 0x01)))
+		{
+			dma_execute();
+		}
+		break;
+	case 0x01: // DMA_DATA_2_WRITE
+		m_dma_fill_data = data;
+		break;
+	case 0x04: m_dma_src_h = data; break;
+	case 0x05: m_dma_src_m = data; break;
+	case 0x06: m_dma_src_l = data; break;
+	case 0x08: m_dma_dst_h = data; break;
+	case 0x09: m_dma_dst_m = data; break;
+	case 0x0a: m_dma_dst_l = data; break;
+	case 0x0d: m_dma_size_1d_h = data; break;
+	case 0x0e: m_dma_size_1d_m = data; break;
+	case 0x0f: m_dma_size_1d_l = data; break;
+	case 0x10: m_dma_size_x_h = data; break;
+	case 0x11: m_dma_size_x_l = data; break;
+	case 0x12: m_dma_size_y_h = data; break;
+	case 0x13: m_dma_size_y_l = data; break;
+	case 0x14: m_dma_src_stride_h = data; break;
+	case 0x15: m_dma_src_stride_l = data; break;
+	case 0x16: m_dma_dst_stride_h = data; break;
+	case 0x17: m_dma_dst_stride_l = data; break;
+	default: break;
+	}
+}
+
 // TinyVicky Master Registers ($FFC0 - $FFDF)
 uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 {
@@ -2086,6 +2308,9 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 
 	// $FEA0-$FEA8: Hardware Mouse Cursor
 	map(0xfea0, 0xfea8).rw(FUNC(wildbits_jr2_state::mouse_r), FUNC(wildbits_jr2_state::mouse_w));
+
+	// $FEC0-$FEDF: TinyVicky Direct Memory Access (DMA) Controller
+	map(0xfec0, 0xfedf).rw(FUNC(wildbits_jr2_state::dma_r), FUNC(wildbits_jr2_state::dma_w));
 
 	// $FEE0-$FEFB: Hardware Integer Math Coprocessor
 	map(0xfee0, 0xfefb).rw(FUNC(wildbits_jr2_state::math_r), FUNC(wildbits_jr2_state::math_w));
@@ -2854,6 +3079,26 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_math_divu_num));
 	save_item(NAME(m_math_add_a));
 	save_item(NAME(m_math_add_b));
+	save_item(NAME(m_dma_ctrl));
+	save_item(NAME(m_dma_status));
+	save_item(NAME(m_dma_fill_data));
+	save_item(NAME(m_dma_src_h));
+	save_item(NAME(m_dma_src_m));
+	save_item(NAME(m_dma_src_l));
+	save_item(NAME(m_dma_dst_h));
+	save_item(NAME(m_dma_dst_m));
+	save_item(NAME(m_dma_dst_l));
+	save_item(NAME(m_dma_size_1d_h));
+	save_item(NAME(m_dma_size_1d_m));
+	save_item(NAME(m_dma_size_1d_l));
+	save_item(NAME(m_dma_size_x_h));
+	save_item(NAME(m_dma_size_x_l));
+	save_item(NAME(m_dma_size_y_h));
+	save_item(NAME(m_dma_size_y_l));
+	save_item(NAME(m_dma_src_stride_h));
+	save_item(NAME(m_dma_src_stride_l));
+	save_item(NAME(m_dma_dst_stride_h));
+	save_item(NAME(m_dma_dst_stride_l));
 	save_item(NAME(m_is_turbo));
 	save_item(NAME(m_io_wait_counter));
 	save_item(NAME(m_last_mouse_x));
@@ -2995,6 +3240,28 @@ void wildbits_jr2_state::machine_reset()
 	m_mouse_bytes[1] = 0;
 	m_mouse_bytes[2] = 0;
 	m_sam2695_ctrl = 0x0c; // Tx_empty, Rx_empty
+
+	// Reset DMA Controller
+	m_dma_ctrl = 0;
+	m_dma_status = 0;
+	m_dma_fill_data = 0;
+	m_dma_src_h = 0;
+	m_dma_src_m = 0;
+	m_dma_src_l = 0;
+	m_dma_dst_h = 0;
+	m_dma_dst_m = 0;
+	m_dma_dst_l = 0;
+	m_dma_size_1d_h = 0;
+	m_dma_size_1d_m = 0;
+	m_dma_size_1d_l = 0;
+	m_dma_size_x_h = 0;
+	m_dma_size_x_l = 0;
+	m_dma_size_y_h = 0;
+	m_dma_size_y_l = 0;
+	m_dma_src_stride_h = 0;
+	m_dma_src_stride_l = 0;
+	m_dma_dst_stride_h = 0;
+	m_dma_dst_stride_l = 0;
 
 	memset(m_vram_c0.get(), 0, 0x2000);
 	memset(m_vram_c1.get(), 0, 0x2000);
