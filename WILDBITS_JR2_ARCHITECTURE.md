@@ -1381,7 +1381,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * **Layer 1 Source (`$FFC2[7:4]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
   * **Layer 2 Source (`$FFC3[3:0]`):** `0..2` for `BM0..BM2`, `4..6` for `TL0..TL2`.
   * **`$FFC3[7:4]`:** Reserved / Unused.
-* **MAME Implementation:** In `screen_update_wbjr2()`, the rendering loop traverses Layers 2 down to 0 (or back-to-front), compositing whichever bitmap or tilemap plane is indexed by that layer's selector nibble, with sprites interleaved according to their `SPRITE_DEPTH` bits.
+* **MAME Implementation:** In `wildbits_jr2_state::screen_update()`, the rendering loop traverses Layers 2 down to 0 (or back-to-front), compositing whichever bitmap or tilemap plane is indexed by that layer's selector nibble, with sprites interleaved according to their `SPRITE_DEPTH` bits.
 
 ### 9.2 Hardware Collision Detection Status
 * **Hardware Truth:** **No hardware collision detection logic exists on the Jr2.**
@@ -1404,9 +1404,10 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 * **Hardware Truth:** Clocks are derived from the master 100 MHz system clock and 25.175 MHz dot clock:
   * **Soft-SIDs (Triple MOS 6581/8580 in Page `$C4`):** Driven by a clock enable pulse producing **1,022,727 Hz** (exact Commodore 64 NTSC pitch).
   * **Soft-PSGs (Triple SN76489 in Page `$C4`):** Driven by a clock enable pulse producing **3,579,545 Hz** (standard NTSC colorburst pitch).
-* **MAME Implementation:** Configured directly in MAME device definitions:
+* **Planned MAME Implementation:** Target device configuration when sound hardware is integrated:
   * `MOS6581(config, m_sid[i], 1022727)`
   * `SN76489(config, m_psg[i], 3579545)`
+  *(The emulator currently builds with `MACHINE_NO_SOUND_HW` pending sound subsystem integration).*
 
 ### 9.5 WM8776 Audio CODEC Initialization & Leveling
 * **Hardware Truth:** NitrOS-9 (`InitCODEC` in `vtio.asm`) initializes the Wolfson WM8776 via 16-bit register words written to `$FE70–$FE72`:
@@ -1493,7 +1494,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling in Page `$C0` at `$1100-$1123` | **Completed & Verified** | Verified 3 tilemap planes (TL0..TL2), 8 tile sets (TS0..TS7, linear and square grid modes), 8x8 and 16x16 tile sizes, tile attributes (H/V flip, priority, tile set select, palette offset), 2x2 upscaling, CLUT 0..3 selection, fine X/Y smooth scrolling, and dynamic layer mapping via `VKY_LAYER_CTRL_0/1`. Verified with NitrOS-9 `tltest` (20x15 scrolling matrix, TS0 pattern, CLUT 0). |
 | **TinyVicky Sprites** | 128 hardware sprites (8x8 to 32x32, 8 bpp) in Page `$C0` at `$1300-$16FF`, CLUT 0..3 selection, 4-level layer depth interleaving | **Completed & Verified** | Verified 128 sprite records (8 bytes each, big-endian), variable dimensions (8×8, 16×16, 24×24, 32×32), 32-pixel off-screen coordinate margin, Graphics CLUT 0..3 palette lookups (color index 0 transparent), priority ordering (127 down to 0; sprite 0 on top), and 4-level sprite interleaving depth (`SPRITE_DEPTH` 0..3) across graphics layers. Verified with NitrOS-9 `sprtest2` (two 16×16 bouncing sprites with LUT0 ramp). |
 | **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7` | **Completed & Verified** | Verified 1D linear copy and fill across 2 MB physical memory, 2D rectangular blit and fill with independent source and destination row strides (pitch), cycle-accurate bus pausing, and completion interrupt assertion (`INT_DMA0` on Group 0, bit 6 at `$FE20`). Verified with NitrOS-9 `dmatest` suite (5/5 tests passing). |
-| **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* (Revisit for Implementation) | MAME currently runs with `MACHINE_NO_SOUND_HW`. Revisit requirements updated for `v8_rc12`: VS1053b clocked at 12.288 MHz, fixed offset decode, dual SPI rate, 2KB FIFO at `$FF57`; WM8776 `InitCODEC` R21=`$1F` analog input muxing. |
+| **Audio Synthesizers & Codecs** | Triple PSG (SN76489) + Triple SID (MOS 6581) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder | *Planned* (Revisit for Implementation) | MAME runs with `MACHINE_NO_SOUND_HW`. WM8776 `$FE70–$FE72` register handshake and SAM2695 Edition 2 `$FF30` status flags are implemented. Revisit requirements updated for `v8_rc12`: VS1053b clocked at 12.288 MHz, fixed offset decode, dual SPI rate, 2KB FIFO at `$FF57`; WM8776 `InitCODEC` R21=`$1F` analog input muxing. |
 
 ### 10.2 Resolved Emulator Parity Revisions
 
@@ -1571,7 +1572,8 @@ The following core peripheral and memory mapping revisions have been implemented
       * `shellbg`: Allocates BM2 via `SS.AScrn`, defines CLUT2 with `clutgrid` via `SS.DfPal`, assigns CLUT2 to BM2 via `SS.Palet`, positions BM2 on Layer 2 via `SS.PScrn`, streams 76,800 bytes of `pixmapgrid` into SRAM, and turns on graphics and text overlay (`FFC0 = $0F`).
       * `shellbgoff`: Reverts `$FFC0` to text-only mode (`$01`) and frees BM2 framebuffer via `SS.FScrn`.
       * `gfxstatus`: Confirms register state transitions (`BM02 Enabled`, `CLUT 02`, `FFC0: 0F BM GRF OVRLY TXT`, `FFC3: 02 2=BM0`).
-      * `drawtest`: Interactive mouse drawing on BM0 (`$1000`), CLUT 0 (`$1000` in Page `$C1`), and Layer 0 (`$FFC2 = $00`). Clears canvas with 'c' and cleanly returns to text console on 'q'.
+       * `drawtest`: Interactive mouse drawing on BM0 (`$1000`), CLUT 0 (`$1000` in Page `$C1`), and Layer 0 (`$FFC2 = $00`). Clears canvas with 'c' and cleanly returns to text console on 'q'.
+       * `livingworlds`: Mark Ferrari 5-scene color-cycling engine running in 320×240 256-color mode on BM0, dynamically updating TinyVicky CLUT 0 in Page `$C1`, utilizing 1D Linear DMA fill for instantaneous hardware clearing, locked to 10–12 FPS via TinyVicky VSYNC (`INT_VKY_SOF`), with responsive keyboard scene switching, pause, and clean shell exit.
 
 15. **TinyVicky 128 Hardware Sprites (`SP0–SP127`) & Interleaving Depth**:
     * Implemented 128 hardware sprite compositing in `screen_update()`:
@@ -1600,13 +1602,9 @@ The following core peripheral and memory mapping revisions have been implemented
       * Hardware Bus Cycle Stretching: simulates hardware-intrusive DMA timing by calling `m_maincpu->eat_cycles()` (~100 MB/s fill, ~33 MB/s copy at 6.29 MHz).
       * Completion Interrupt: asserts `INT_DMA0` (Interrupt Group 0, bit 6 at `$FE20`) upon transfer conclusion when `Int_En` (`$FEC0` bit 3) is set.
       * MAME state saving and reset defaults registered for all 20 internal registers.
-    * Verified with NitrOS-9 `dmatest`:
-      * Test 1: 1D Linear Fill (256 bytes with `$5A`).
-      * Test 2: 1D Linear Copy (256 bytes ramp pattern `$00..$FF`).
-      * Test 3: 2D Rectangular Block Copy (16×16 block in 32-byte pitch canvas with stride preservation).
-      * Test 4: 2D Rectangular Block Fill (8×8 box with `$C3` in 32-byte pitch canvas).
-      * Test 5: Completion Interrupt Assertion and clearing via `INT_PENDING_0` (`$FE20` bit 6).
-      * Results: All 5 tests passed cleanly with exit status 0.
+    * Verified with NitrOS-9:
+      * `dmatest`: 1D Linear Fill (256 B `$5A`), 1D Linear Copy (256 B ramp `$00..$FF`), 2D Rectangular Block Copy (16×16 in 32 B pitch canvas), 2D Rectangular Block Fill (8×8 box `$C3`), and Completion Interrupt (`INT_DMA0` at `$FE20` bit 6) all passed cleanly with exit status 0.
+      * `livingworlds`: 1D Linear DMA Fill of 76,800 bytes (`$012C00`) to clear the 320×240 graphics framebuffer to black (`$00`) at scene transitions.
 
 ---
 
