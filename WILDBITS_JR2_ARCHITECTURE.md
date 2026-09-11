@@ -1133,16 +1133,18 @@ TinyVicky II provides real-time raster beam tracking and a programmable scanline
 |                    RASTER BEAM TRACKING & LINE INTERRUPTS ($FFD8 - $FFDB)             |
 +---------------------------------------------------------------------------------------+
 |  Read:                                              Write:                            |
-|  - $FFD8-$FFD9: RAST_COL (0..799 Dot Clock Beam X)  - $FFD8-$FFD9: LINE_CMP (0..524) |
-|  - $FFDA-$FFDB: RAST_ROW (0..524 Scanline Beam Y)   (Triggers INT_VKY_SOL at target)  |
+|  - $FFD8-$FFD9: RAST_COL (0..799 Dot Clock Beam X)  - $FFD8: LINT_CTRL (bit 0: ENABLE)|
+|  - $FFDA-$FFDB: RAST_ROW (0..524 Scanline Beam Y)   - $FFD9-$FFDA: LINE_CMP (0..524)  |
+|                                                     (std $FFD9 triggers INT_VKY_SOL)  |
 +---------------------------------------------------------------------------------------+
 ```
 
 #### Operating Characteristics:
-* **Continuous Beam Monitoring:** Reading `RAST_ROW` (`$FFDA-$FFDB`) returns the current active vertical scanline (0..479 in 60Hz mode, 0..399 in 70Hz mode, advancing through VBLANK to 524 before frame reset). `RAST_COL` (`$FFD8-$FFD9`) returns the horizontal dot clock pixel position (0..799).
-* **Event-Driven Line Interrupt Scheduling:** Writing `LINE_CMP` (`$FFD8-$FFD9`) programs a hardware comparator target. When the raster beam reaches the target scanline, `INT_VKY_SOL` (`Group 0, bit 1`) is asserted.
+* **Continuous Beam Monitoring:** Reading `RAST_ROW` (`$FFDA-$FFDB`, Big-Endian) returns the current active vertical scanline (0..479 in 60Hz mode, 0..399 in 70Hz mode, advancing through VBLANK to 524 before frame reset). `RAST_COL` (`$FFD8-$FFD9`, Big-Endian) returns the horizontal dot clock pixel position (0..799).
+* **Line Interrupt Control & Target Scheduling:** Writing `$FFD8` (`LINT_CTRL`) configures line interrupt generation (bit 0 = 1 enables `INT_VKY_SOL` assertion, bit 0 = 0 disables). Writing `LINE_CMP` (`$FFD9-$FFDA`, Big-Endian: `$FFD9` = high byte bits 11:8, `$FFDA` = low byte bits 7:0) programs the scanline comparator target. On 6809 systems, software updates both registers atomically via `std $FFD9`.
+* **Raster Partial Updates:** Master video control register changes (`$FFC0` and `$FFC1`), such as dynamic mid-frame font bank switching (`FT_FSET` bit 5), trigger partial raster slices (`update_partial`) so that top-of-screen text, mid-screen preview windows, and bottom menus render cleanly with their respective active font banks without full-screen jitter or character vibration.
 * **Multi-Split / Raster Synchronized Effects:** Mid-frame dynamic reprogramming allows multiple split-screen raster interrupts per frame (e.g., palette changes, scrolling splits, or status bars).
-* **Zero-Overhead Idle State:** When unprogrammed (`LINE_CMP = $FFFF`), the emulation timer is disabled (`attotime::never`), ensuring zero CPU overhead while preserving jitter-free beam position reads.
+* **Zero-Overhead Idle State:** When unprogrammed or disabled (`m_vky_lint_ctrl = 0` or `LINE_CMP = $FFFF`), the emulation timer is disabled (`attotime::never`), ensuring zero CPU overhead while preserving jitter-free beam position reads.
 
 ---
 

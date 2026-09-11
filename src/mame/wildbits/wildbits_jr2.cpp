@@ -455,6 +455,7 @@ private:
 	uint16_t m_vky_crsr_x;
 	uint16_t m_vky_crsr_y;
 	uint16_t m_vky_line_cmp;
+	uint8_t m_vky_lint_ctrl;
 	emu_timer *m_scanline_timer;
 
 	// Keyboard, DIP Switch & Mouse Input Ports
@@ -2093,8 +2094,20 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 	io_wait();
 	switch (offset)
 	{
-	case 0x00: m_vky_mstr_ctrl_0 = data; break;
-	case 0x01: m_vky_mstr_ctrl_1 = data; break;
+	case 0x00:
+		if (m_vky_mstr_ctrl_0 != data)
+		{
+			m_screen->update_partial(m_screen->vpos());
+			m_vky_mstr_ctrl_0 = data;
+		}
+		break;
+	case 0x01:
+		if (m_vky_mstr_ctrl_1 != data)
+		{
+			m_screen->update_partial(m_screen->vpos());
+			m_vky_mstr_ctrl_1 = data;
+		}
+		break;
 	case 0x02: m_vky_layer_ctrl_0 = data; break;
 	case 0x03: m_vky_layer_ctrl_1 = data; break;
 	case 0x04: m_vky_brdr_ctrl = data; break;
@@ -2114,10 +2127,14 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 	case 0x16: m_vky_crsr_y = (m_vky_crsr_y & 0x00ff) | (data << 8); break;
 	case 0x17: m_vky_crsr_y = (m_vky_crsr_y & 0xff00) | data; break;
 	case 0x18:
-		m_vky_line_cmp = (m_vky_line_cmp & 0x00ff) | (data << 8); // LINE_CMP_H
+		m_vky_lint_ctrl = data;
 		update_line_timer();
 		break;
 	case 0x19:
+		m_vky_line_cmp = (m_vky_line_cmp & 0x00ff) | (data << 8); // LINE_CMP_H
+		update_line_timer();
+		break;
+	case 0x1a:
 		m_vky_line_cmp = (m_vky_line_cmp & 0xff00) | data;        // LINE_CMP_L
 		update_line_timer();
 		break;
@@ -2127,7 +2144,7 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 
 void wildbits_jr2_state::update_line_timer()
 {
-	if (m_vky_line_cmp < 525)
+	if ((m_vky_lint_ctrl & 0x01) && m_vky_line_cmp < 525)
 	{
 		m_scanline_timer->adjust(m_screen->time_until_pos(m_vky_line_cmp, 0));
 	}
@@ -2140,7 +2157,7 @@ void wildbits_jr2_state::update_line_timer()
 TIMER_CALLBACK_MEMBER(wildbits_jr2_state::scanline_tick)
 {
 	set_irq(0, 0x02); // INT_VKY_SOL (Group 0, Bit 1)
-	if (m_vky_line_cmp < 525)
+	if ((m_vky_lint_ctrl & 0x01) && m_vky_line_cmp < 525)
 	{
 		m_scanline_timer->adjust(m_screen->time_until_pos(m_vky_line_cmp, 0));
 	}
@@ -3072,6 +3089,7 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_mouse_y));
 	save_item(NAME(m_mouse_bytes));
 	save_item(NAME(m_sam2695_ctrl));
+	save_item(NAME(m_vky_lint_ctrl));
 	save_item(NAME(m_vky_line_cmp));
 	save_item(NAME(m_math_mulu_a));
 	save_item(NAME(m_math_mulu_b));
@@ -3152,6 +3170,7 @@ void wildbits_jr2_state::machine_reset()
 	m_math_add_b = 0;
 
 	// Reset Video line compare
+	m_vky_lint_ctrl = 0;
 	m_vky_line_cmp = 0xffff;
 	m_scanline_timer->adjust(attotime::never);
 
