@@ -2071,12 +2071,35 @@ void wildbits_jr2_state::fpu_w(offs_t offset, uint8_t data)
 }
 
 // TinyVicky Direct Memory Access (DMA) Controller ($FEC0 - $FEDF)
+// On physical hardware, the DMA engine is an external SRAM bus master.
+// It directly drives the external 2MB SRAM chip and does not access internal
+// FPGA Block RAM (VICKY control, CLUTs, text/color matrices: $C0-$C4).
 uint8_t wildbits_jr2_state::dma_read_byte(uint32_t phys_addr)
 {
 	phys_addr &= 0x1fffff;
 	uint8_t block = (phys_addr >> 13) & 0xff;
 	uint16_t offset = phys_addr & 0x1fff;
-	return get_physical_block_ptr(block)[offset];
+	if (block < 0x40)
+		return m_ram[block * 0x2000 + offset];
+	else if (block >= 0x40 && block < 0x80)
+	{
+		if (m_mmu_io_ctrl & 0x04)
+			return m_ram[block * 0x2000 + offset];
+		else
+			return m_flash[(block - 0x40) * 0x2000 + offset];
+	}
+	else if (block >= 0x80 && block < 0xa0)
+	{
+		if (m_mmu_io_ctrl & 0x04)
+			return m_ram[block * 0x2000 + offset];
+		else
+			return m_cart[(block - 0x80) * 0x2000 + offset];
+	}
+	else if (block >= 0xa0 && block < 0xc0)
+		return m_ram[block * 0x2000 + offset];
+	else if (block >= 0xd0 && block < 0xf0)
+		return m_ram[block * 0x2000 + offset];
+	return 0xff; // Internal FPGA BRAM ($C0-$C4), I/O ($C5-$CF), and unmapped ($F0-$FF)
 }
 
 void wildbits_jr2_state::dma_write_byte(uint32_t phys_addr, uint8_t data)
@@ -2104,30 +2127,11 @@ void wildbits_jr2_state::dma_write_byte(uint32_t phys_addr, uint8_t data)
 	{
 		m_ram[block * 0x2000 + offset] = data;
 	}
-	else if (block == 0xc0)
-	{
-		m_vram_c0[offset] = data;
-	}
-	else if (block == 0xc1)
-	{
-		m_vram_c1[offset] = data;
-	}
-	else if (block == 0xc2)
-	{
-		m_vram_c2[offset] = data;
-	}
-	else if (block == 0xc3)
-	{
-		m_vram_c3[offset] = data;
-	}
-	else if (block == 0xc4)
-	{
-		m_vram_c4[offset] = data;
-	}
 	else if (block >= 0xd0 && block < 0xf0)
 	{
 		m_ram[block * 0x2000 + offset] = data;
 	}
+	// Blocks $C0-$C4 (internal FPGA BRAM) are ignored by the SRAM DMA controller
 }
 
 void wildbits_jr2_state::dma_execute()
