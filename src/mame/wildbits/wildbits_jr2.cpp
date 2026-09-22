@@ -2297,10 +2297,10 @@ uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 	case 0x10: return m_vky_crsr_ctrl;
 	case 0x12: return m_vky_crsr_char;
 	case 0x13: return m_vky_crsr_color;
-	case 0x14: return m_vky_crsr_x >> 8;
-	case 0x15: return m_vky_crsr_x & 0xff;
-	case 0x16: return m_vky_crsr_y >> 8;
-	case 0x17: return m_vky_crsr_y & 0xff;
+	case 0x14: return m_vky_crsr_x & 0xff; // Hardware readback: Low byte at 0x14
+	case 0x15: return m_vky_crsr_x >> 8;   // Hardware readback: High byte at 0x15
+	case 0x16: return m_vky_crsr_y & 0xff; // Hardware readback: Low byte at 0x16
+	case 0x17: return m_vky_crsr_y >> 8;   // Hardware readback: High byte at 0x17
 	case 0x18: return m_screen->hpos() >> 8;   // RAST_COL_H
 	case 0x19: return m_screen->hpos() & 0xff; // RAST_COL_L
 	case 0x1a: return m_screen->vpos() >> 8;   // RAST_ROW_H
