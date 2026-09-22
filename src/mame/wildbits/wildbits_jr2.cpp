@@ -2259,13 +2259,11 @@ void wildbits_jr2_state::dma_w(offs_t offset, uint8_t data)
 	if (offset == 0)
 	{
 		// Hardware state machine:
-		// Starting a transfer requires a rising edge on bit 7 (Start_Trf),
-		// and bit 0 (DMA_Enable) must already be high when the edge lands.
+		// Starting a transfer requires a rising edge on bit 7 (Start_Trf: 0 -> 1).
 		// Software must clear bit 7 back to 0 before starting another transfer.
-		bool was_enabled = (m_dma_reg[0] & 0x01) != 0;
 		bool rising_start = (data & 0x80) && !(m_dma_reg[0] & 0x80);
 		m_dma_reg[0] = data;
-		if (rising_start && was_enabled)
+		if (rising_start)
 		{
 			dma_execute();
 		}
