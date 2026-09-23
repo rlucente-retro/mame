@@ -3034,24 +3034,34 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 		uint8_t b2 = m_vram_c0[tm_base + 2];
 		uint8_t b3 = m_vram_c0[tm_base + 3];
 		uint32_t start_addr;
-		if (b3 <= 0x07 && b1 > 0x07)
-			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Little-endian
-		else if (b1 <= 0x07 && b3 > 0x07)
+		if (b1 <= 0x07 && b3 > 0x07)
 			start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3; // Big-endian
+		else if (b3 <= 0x07 && b1 > 0x07)
+			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Little-endian
+		else if (b1 != 0 && b3 == 0)
+			start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3; // Big-endian (H in b1, L is 0)
 		else if (b1 == 0 && b3 != 0)
-			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Little-endian (H in b3)
+			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Little-endian (H in b3, L is 0)
 		else
-			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Default Little-endian per wildbits.d
+			start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3; // Default Big-endian on 6809
 
-		// Virtual map size in tiles (per defs/wildbits.d: +4: SIZE_L, +5: SIZE_H)
-		uint16_t map_w = m_vram_c0[tm_base + 4] | ((uint16_t)m_vram_c0[tm_base + 5] << 8);
-		if (map_w == 0)
+		// Virtual map size in tiles (Big-Endian on FNX6809: +4: SIZE_H, +5: SIZE_L)
+		uint16_t map_w;
+		if (m_vram_c0[tm_base + 4] == 0 && m_vram_c0[tm_base + 5] != 0)
+			map_w = m_vram_c0[tm_base + 5]; // Big-endian: High=0, Low in +5
+		else if (m_vram_c0[tm_base + 5] == 0 && m_vram_c0[tm_base + 4] != 0)
+			map_w = m_vram_c0[tm_base + 4]; // Little-endian fallback: High=0, Low in +4
+		else
 			map_w = ((uint16_t)m_vram_c0[tm_base + 4] << 8) | m_vram_c0[tm_base + 5];
 		if (map_w == 0)
 			map_w = (bm_w / tile_size);
 
-		uint16_t map_h = m_vram_c0[tm_base + 6] | ((uint16_t)m_vram_c0[tm_base + 7] << 8);
-		if (map_h == 0)
+		uint16_t map_h;
+		if (m_vram_c0[tm_base + 6] == 0 && m_vram_c0[tm_base + 7] != 0)
+			map_h = m_vram_c0[tm_base + 7]; // Big-endian: High=0, Low in +7
+		else if (m_vram_c0[tm_base + 7] == 0 && m_vram_c0[tm_base + 6] != 0)
+			map_h = m_vram_c0[tm_base + 6]; // Little-endian fallback: High=0, Low in +6
+		else
 			map_h = ((uint16_t)m_vram_c0[tm_base + 6] << 8) | m_vram_c0[tm_base + 7];
 		if (map_h == 0)
 			map_h = (bm_h / tile_size);
@@ -3059,9 +3069,23 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 		if (map_w == 0 || map_h == 0)
 			return;
 
-		// Scroll offsets in pixels (per defs/wildbits.d: +8: POS_L, +9: POS_H)
-		uint16_t scroll_x = m_vram_c0[tm_base + 8] | ((uint16_t)m_vram_c0[tm_base + 9] << 8);
-		uint16_t scroll_y = m_vram_c0[tm_base + 10] | ((uint16_t)m_vram_c0[tm_base + 11] << 8);
+		// Scroll offsets in pixels (FNX6809 hardware register pairs are Big-Endian:
+		// +8: POS_H, +9: POS_L, +10: POS_H, +11: POS_L)
+		uint16_t scroll_x;
+		if (m_vram_c0[tm_base + 8] == 0 && m_vram_c0[tm_base + 9] != 0)
+			scroll_x = m_vram_c0[tm_base + 9]; // Big-endian: High=0, Low in +9
+		else if (m_vram_c0[tm_base + 9] == 0 && m_vram_c0[tm_base + 8] != 0)
+			scroll_x = m_vram_c0[tm_base + 8]; // Little-endian fallback: High=0, Low in +8
+		else
+			scroll_x = ((uint16_t)m_vram_c0[tm_base + 8] << 8) | m_vram_c0[tm_base + 9]; // Big-endian default
+
+		uint16_t scroll_y;
+		if (m_vram_c0[tm_base + 10] == 0 && m_vram_c0[tm_base + 11] != 0)
+			scroll_y = m_vram_c0[tm_base + 11]; // Big-endian: High=0, Low in +11
+		else if (m_vram_c0[tm_base + 11] == 0 && m_vram_c0[tm_base + 10] != 0)
+			scroll_y = m_vram_c0[tm_base + 10]; // Little-endian fallback: High=0, Low in +10
+		else
+			scroll_y = ((uint16_t)m_vram_c0[tm_base + 10] << 8) | m_vram_c0[tm_base + 11]; // Big-endian default
 
 		int total_w_pix = (int)map_w * tile_size;
 		int total_h_pix = (int)map_h * tile_size;
@@ -3108,14 +3132,16 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				uint8_t tb1 = m_vram_c0[ts_reg + 1];
 				uint8_t tb2 = m_vram_c0[ts_reg + 2];
 				uint32_t ts_addr;
-				if (tb2 <= 0x07 && tb0 > 0x07)
-					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Little-endian
-				else if (tb0 <= 0x07 && tb2 > 0x07)
+				if (tb0 <= 0x07 && tb2 > 0x07)
 					ts_addr = ((uint32_t)tb0 << 16) | ((uint32_t)tb1 << 8) | tb2; // Big-endian
+				else if (tb2 <= 0x07 && tb0 > 0x07)
+					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Little-endian
+				else if (tb0 != 0 && tb2 == 0)
+					ts_addr = ((uint32_t)tb0 << 16) | ((uint32_t)tb1 << 8) | tb2; // Big-endian (H in tb0, L is 0)
 				else if (tb0 == 0 && tb2 != 0)
-					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Little-endian (H in tb2)
+					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Little-endian (H in tb2, L is 0)
 				else
-					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Default Little-endian per wildbits.d
+					ts_addr = ((uint32_t)tb0 << 16) | ((uint32_t)tb1 << 8) | tb2; // Default Big-endian on 6809
 
 				bool square = (m_vram_c0[ts_reg + 3] & 0x08) != 0;
 
