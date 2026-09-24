@@ -3120,6 +3120,12 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				uint8_t tile_idx = m_ram[cell_addr + 0];
 				uint8_t tile_attr = m_ram[cell_addr + 1];
 
+				// On TinyVicky II FPGA hardware, tile index 0 in the matrix is transparent (no tile).
+				// Positive tile indices 1..255 are 1-based references to tiles in the active Tile Set (0..254).
+				if (tile_idx == 0)
+					continue;
+				uint8_t eff_tile_idx = tile_idx - 1;
+
 				bool hflip = (tile_attr & 0x80) != 0;
 				bool vflip = (tile_attr & 0x40) != 0;
 				int fine_x = hflip ? ((tile_size - 1) - fine_x_orig) : fine_x_orig;
@@ -3148,14 +3154,14 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				uint32_t pix_addr;
 				if (square)
 				{
-					int tile_col = tile_idx % 16;
-					int tile_row = tile_idx / 16;
+					int tile_col = eff_tile_idx % 16;
+					int tile_row = eff_tile_idx / 16;
 					int pitch = 16 * tile_size; // 128 for 8x8, 256 for 16x16
 					pix_addr = ts_addr + (uint32_t)(tile_row * tile_size + fine_y) * pitch + (tile_col * tile_size + fine_x);
 				}
 				else
 				{
-					pix_addr = ts_addr + ((uint32_t)tile_idx * tile_size + fine_y) * tile_size + fine_x;
+					pix_addr = ts_addr + ((uint32_t)eff_tile_idx * tile_size + fine_y) * tile_size + fine_x;
 				}
 
 				if (pix_addr >= 0x080000)
