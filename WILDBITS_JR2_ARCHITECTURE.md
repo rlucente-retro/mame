@@ -1335,8 +1335,8 @@ The FPGA implements a high-speed hardware DMA engine capable of executing linear
   * Read: Bit 7 (`$80` = `DMA_STATUS_TRF_IP`) indicates transfer in progress (`1` = Busy, `0` = Idle/Complete; bits 6..0 hardwired 0; idle read is exactly `$00`).
   * Write: 8-bit fill byte value used when CTRL bit 2 is set and bit 6 is clear.
 * **`$FEC2 - $FEC3` (`DMA_FILL_WORD_H/L`):** 16-bit fill word value used during 16-bit fill operations (when CTRL bit 6 is set).
-* **`$FEC5 - $FEC7` (`DMA_SOURCE_ADDR_H/M/L`):** 24-bit physical source start address (`SA_H`, `SA_M`, `SA_L`; `$FEC4` is unused).
-* **`$FEC9 - $FECB` (`DMA_DEST_ADDR_H/M/L`):** 24-bit physical destination start address (`DA_H`, `DA_M`, `DA_L`; `$FEC8` is unused).
+* **`$FEC4 - $FEC6` (`DMA_SOURCE_ADDR_L/M/H`):** 24-bit physical source start address in Little-Endian byte order (`SA_L`, `SA_M`, `SA_H`; `$FEC7` is unused).
+* **`$FEC8 - $FECA` (`DMA_DEST_ADDR_L/M/H`):** 24-bit physical destination start address in Little-Endian byte order (`DA_L`, `DA_M`, `DA_H`; `$FECB` is unused).
 * **`$FECC - $FECD` (`DMA_X_SIZE_H/L`):** 16-bit block width (in bytes) in 2D mode; in 1D mode, bits 15:0 of the 24-bit 1D length.
 * **`$FECE - $FECF` (`DMA_Y_SIZE_H/L`):** 16-bit block height (row count) in 2D mode; in 1D mode, `$FECF` holds bits 23:16 of the 24-bit 1D length (`$FECE` is a live 2D register ignored in 1D).
 * **`$FED0 - $FED1` (`DMA_SRC_STRIDE_H/L`):** 16-bit source row stride (bytes added to source pointer at the end of each row in 2D mode).

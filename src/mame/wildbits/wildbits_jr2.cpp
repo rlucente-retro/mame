@@ -2140,8 +2140,8 @@ void wildbits_jr2_state::dma_execute()
 	bool is_fill = (m_dma_reg[0] & 0x04) != 0;
 	bool int_en = (m_dma_reg[0] & 0x08) != 0;
 
-	uint32_t src = ((uint32_t)m_dma_reg[5] << 16) | ((uint32_t)m_dma_reg[6] << 8) | m_dma_reg[7];
-	uint32_t dst = ((uint32_t)m_dma_reg[9] << 16) | ((uint32_t)m_dma_reg[10] << 8) | m_dma_reg[11];
+	uint32_t src = ((uint32_t)m_dma_reg[6] << 16) | ((uint32_t)m_dma_reg[5] << 8) | m_dma_reg[4];
+	uint32_t dst = ((uint32_t)m_dma_reg[10] << 16) | ((uint32_t)m_dma_reg[9] << 8) | m_dma_reg[8];
 	uint8_t fill_byte = m_dma_reg[1];
 
 	m_dma_status = 0x80; // Transfer in progress
