@@ -4,7 +4,7 @@
 
 ## 1. Overview & System Specifications
 
-The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a modern retrocomputing platform powered by an FPGA-centric architecture on a compact Pico-ITX motherboard (100mm × 70mm). When loaded with the **FNX6809** firmware core (authoritative hardware baseline: **`wildbits_jr2_6809_v8_rc16`**, core built 2026-09-13 21:36; future kit built 2026-09-14 02:12), the system pairs a Motorola 6809 CPU core with the **TinyVicky II** graphics engine, a hardware Memory Management Unit (MMU) supporting up to 1,792 KB RAM, integrated audio synthesizers including Yamaha OPL3 FM synthesis, high-speed DMA, an integer math coprocessor, and rich peripheral interfaces.
+The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a modern retrocomputing platform powered by an FPGA-centric architecture on a compact Pico-ITX motherboard (100mm × 70mm). When loaded with the **FNX6809** firmware core (authoritative hardware baseline: **`wildbits_jr2_6809_v8_rc17`**, core built 2026-09-23 17:51, recipe `fpga/build_jr2_rc17_line_fast_2.tcl`, WNS +0.019 ns; parity kit built 2026-09-24 11:15), the system pairs a Motorola 6809 CPU core with the **TinyVicky II** graphics engine, a hardware Memory Management Unit (MMU) supporting up to 1,792 KB RAM, integrated audio synthesizers including Yamaha OPL3 FM synthesis, high-speed DMA with bitwise logic operations, an integer math coprocessor, and rich peripheral interfaces.
 
 ```
 +----------------------------------------------------------------------------------------+
@@ -23,20 +23,22 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
 |  - Hardware Grayscale Mouse Cursor                 - WDC 65C22 VIA / Joysticks         |
 |  - Line Interrupts & Counters (SOL/SOF)            - OPL3 FM Synthesizer (FPGA)        |
 |  - Pre-loaded OS-9 Bannerfont & Palette BRAM       - VS1053b MP3 Decoder (12.288 MHz)  |
-|                                                    - Onboard 8-Position DIP Switches   |
+|  - Bresenham Line Drawer (LINEDRAW FIFO, rc17)     - Onboard 8-Position DIP Switches   |
+|  - DMA Engine w/ Logic Ops ($FED4, rc17)           - Turbo Fast I/O Writes ($Cx, rc17) |
 +----------------------------------------------------------------------------------------+
 ```
 
 ### Key Specifications
 * **CPU:** Motorola 6809 soft core (FNX6809, Big Endian) running inside an onboard FPGA (**Xilinx Artix-7 35T**, `xc7a35tcsg324`), clocked at **6.29 MHz** (1/4th of the 25.175 MHz video dot clock oscillator; configured in MAME via `XTAL(25'175'000)` with internal ÷ 4). Optional DIP-switchable turbo stretch mode runs at **~1.4x speed (~8.8–9.0 MHz)** utilizing 24-tick shortened instruction fetch cycles (`TURBO_FASTWRITE`).
+* **Turbo Fast I/O Writes (`TURBO_FASTIOWRITE`, rc17):** CPU writes to `$Cx` / VICKY register pages complete in 24-tick fast frames like RAM writes, accelerating graphics and display register setup.
 * **SRAM Bus Geometry (`FASTWR_LATE2`):** To accommodate the Jr2's external ISSI IS61WV102416FBLL-8BLI (1M × 16, 8ns) high-speed asynchronous SRAM (mapped into Blocks `$00–$3F`, `$A0–$BF`, `$D0–$EF`, and optionally `$40–$9F`), write enable (`WE_n`) is delayed to ticks 9–11 of the 32-tick write frame (released at tick 12). This grants a full **15 ns address setup time**, eliminating display artifacts ("sparklies") during simultaneous background SD transfers and foreground bitmap compositing under turbo.
-* **FPGA Configuration Memory:** 16 MB Micron MT25QL128 Quad-SPI Flash memory (`write_cfgmem -format mcs -size 16 -interface SPIx4`), programmed via [`wildbits_jr2_6809_v8_rc16.mcs`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc16/wildbits_jr2_6809_v8_rc16.mcs).
+* **FPGA Configuration Memory:** 16 MB Micron MT25QL128 Quad-SPI Flash memory (`write_cfgmem -format mcs -size 16 -interface SPIx4`), programmed via [`wildbits_jr2_6809_v8_rc17.mcs`](file:///Users/richardlucente/tmp/parity_wildbits_jr2_v8_rc17/wildbits_jr2_6809_v8_rc17.mcs).
 * **System Bus:** 21-bit physical address bus addressing up to 2 MB of physical address space.
 * **CPU Address Space:** 16-bit (64 KB) paged into eight 8 KB slots via 4 hardware Look-Up Tables (MLUTs).
-* **System RAM:** Up to **1,792 KB (1.75 MB)** RAM addressable (`v8_rc16` + max-RAM kernel). Standard 512 KB onboard high-speed SRAM (Physical Blocks `$00 - $3F`, physical `0x000000 - 0x07FFFF`), RAM Window A 256 KB (Physical Blocks `$A0 - $BF`, physical `0x140000 - 0x17FFFF`), RAM Window B 256 KB (Physical Blocks `$D0 - $EF`, physical `0x1A0000 - 0x1DFFFF`, identity address block × $2000), plus FLASHDIS mode (`$FFA1` bit 2) turning Blocks `$40–$9F` into 768 KB of additional SRAM (`0x080000 - 0x13FFFF`).
+* **System RAM:** Up to **1,792 KB (1.75 MB)** RAM addressable (`v8_rc17` + max-RAM kernel). Standard 512 KB onboard high-speed SRAM (Physical Blocks `$00 - $3F`, physical `0x000000 - 0x07FFFF`), RAM Window A 256 KB (Physical Blocks `$A0 - $BF`, physical `0x140000 - 0x17FFFF`), RAM Window B 256 KB (Physical Blocks `$D0 - $EF`, physical `0x1A0000 - 0x1DFFFF`, identity address block × $2000), plus FLASHDIS mode (`$FFA1` bit 2) turning Blocks `$40–$9F` into 768 KB of additional SRAM (`0x080000 - 0x13FFFF`).
 * **Flash ROM:** 512 KB onboard non-volatile Flash ROM (Physical Blocks `$40 - $7F`, physical `0x080000 - 0x0FFFFF` of the SST39VF chip) when FLASHDIS is inactive. Contains the Level 1 First Execution Unit (FEU), `/f0` flash volume, and user flash drive `/f1`.
 * **Expansion Cartridge:** Cartridge decode at Physical Blocks `$80 - $9F` (256 KB window) supporting `/c0` (based at `$80`) and `/c1` (based at `$90`), sharing the external bus and shaped write strobe with onboard flash and RTC.
-* **Video Controller:** **TinyVicky II** outputting DVI/VGA at 60 Hz (640 × 480 text, 320 × 240 graphics) or 70 Hz (640 × 400 text, 320 × 200 graphics). Features verified timing closure across all triple-clock domains (video, 100 MHz, 200 MHz) with worst negative slack **+0.173 ns** and worst hold slack **+0.004 ns**, zero failing endpoints (`v8_rc16`, 34,183 setup endpoints, block RAM 36 of 50).
+* **Video Controller:** **TinyVicky II** outputting DVI/VGA at 60 Hz (640 × 480 text, 320 × 240 graphics) or 70 Hz (640 × 400 text, 320 × 200 graphics). Features verified timing closure across all triple-clock domains (video, 100 MHz, 200 MHz) with worst negative slack **+0.019 ns** (recipe `fpga/build_jr2_rc17_line_fast_2.tcl`), zero failing endpoints (`v8_rc17`).
 * **Graphics Engines:**
   * Character text matrix (80 × 30, 80 × 60, 40 × 30, or 40 × 60) with dual 2 KB font banks pre-initialized with the **OS-9 Bannerfont** and color lookup tables pre-initialized with the **OS-9 Palette** directly in FPGA BRAM (`mif/Text_LUT_OS9_palette.coe` and `mif/Font_OS9_bannerfont.coe`), freeing >2 KB of system memory in bootfiles.
   * 3 full-screen 256-color bitmapped planes (320 × 200 or 320 × 240).
@@ -47,7 +49,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
   * Dedicated text Foreground and Background Color Look-Up Tables (16 colors each), shadowed and **readable by the CPU** (`v8_rc13`+).
   * Hardware Gamma correction look-up tables (Red, Green, Blue).
   * Hardware grayscale mouse cursor (16 × 16) with pixel rendering gated on enable bit (`$FEA0` bit 0, `v8_rc11`+) and cursor position preserved across auto-hide (`wb/mouse_hide_unhide`).
-  * **Line-Draw Accelerator:** Hardware Bresenham line-drawing unit at Page `$C0` offsets `$1080–$1087` backed by a 4,096 × 32-bit pixel queue (`LD_AddyPixel_FIFO`) for 320 × 240 8 bpp graphics.
+  * **Line-Draw Accelerator (`v8_rc17`):** Hardware Bresenham line-drawing unit at Page `$C0` offsets `$1080–$1087` backed by a 4,096 × 32-bit pixel queue (`LINEDRAW_AddyPixel_FIFO`, 4 × RAMB36 BRAM tiles) for 320 × 240 8 bpp graphics. In rc17, pixel pops are strictly gated off during CPU read slots, fast-write holds, and stock late writes, and a video slot borrower accelerates rendering, completely eliminating dropped pixels across diagonal, shallow, and steep lines (`TESTS/linetest`).
 * **Audio Subsystem:**
   * **Yamaha OPL3 FM Synthesizer:** Integrated in FPGA core (located in VICKY Page `$C4` at offsets `$0180–$0183`, physical addresses `0x188180–0x188183`), providing 4-operator / 2-operator FM music synthesis (write-only register interface; status reads and IRQ unconnected), mixed in stereo as the third term into the master DAC sum.
   * Triple **SN76489** Programmable Sound Generators (PSGs) emulated in FPGA (Left at `$0200`, Center/Mono at `$0208`, Right at `$0210` in Block `$C4`; software-configurable stereo/mono via `SYS1`). Driven by a 3,579,545 Hz clock enable.
@@ -68,7 +70,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
   * Onboard 8-Position Hardware Configuration DIP Switches at `$FF90` (Turbo stretch mode, Gamma default, Boot mode, and User switches).
   * USB-C debug & flash programming interface (FTDI FT4232H bridge).
 * **Hardware Acceleration:**
-  * Direct Memory Access (DMA) engine supporting 1D linear fill/copy and 2D rectangular block copy/fill with programmable source/destination strides at `$FEC0-$FED7` (writes are direct at `$FEC0–$FED7`, readback is permuted in hardware per `tests/dma.asm`, transfers run during vertical blanking, and transfer initiation asserts CPU bus halt).
+  * Direct Memory Access (DMA) engine supporting 1D linear fill/copy and 2D rectangular block copy/fill with programmable source/destination strides at `$FEC0-$FED7` (writes are direct at `$FEC0–$FED7`, readback is permuted in hardware per `tests/dma.asm`, transfers run during vertical blanking, and transfer initiation asserts CPU bus halt). In `v8_rc17`, features **Hardware Logic Operations** at `$FED4` (`DMA_OP_REG`: COPY, OR, AND, XOR, MASK nibble transparency, and NOT inversion) and a hardened bus grant / active / drain sequencing handshake preventing SRAM slot collision hazards. Direct write addressing: `$FEC5–$FEC7` source (H/M/L), `$FEC9–$FECB` destination (H/M/L).
   * Hardware Integer Math Coprocessor (16 × 16 → 32-bit unsigned multiplication, 16 / 16 → 16-bit unsigned division with 16-bit quotient at `$FEF4–$FEF5` and 16-bit remainder at `$FEF6–$FEF7`, and 32-bit addition) at `$FEE0-$FEFB`, with fixed remainder readback at `$FEF6–$FEF7` (`MATH_DIV_REM`).
   * Hardware Floating-Point Unit (FPU) accelerator at `$FFE0–$FFEF`.
 
@@ -103,13 +105,13 @@ While both machines share the core TinyVicky II video engine, the FNX6809 CPU co
 
 ### 1.3 Parity Release Package & Firmware File Reconciliation
 
-The official parity release kit for the Wildbits Jr2 Future (`parity_wildbits_jr2_v8_rc16.zip`, core built 2026-09-13 21:36; kit built 2026-09-14 02:12) contains the authoritative files required to configure the hardware, program non-volatile flash, and boot NitrOS-9 Level 2:
+The official parity release kit for the Wildbits Jr2 Future (`parity_wildbits_jr2_v8_rc17.zip`, core built 2026-09-23 17:51; kit built 2026-09-24 11:15) contains the authoritative files required to configure the hardware, program non-volatile flash, and boot NitrOS-9 Level 2:
 
 | File Name | Size | Target Hardware Entity | Function / Memory Destination |
 | :--- | :--- | :--- | :--- |
-| **`wildbits_jr2_6809_v8_rc16.mcs`** | 6,165,628 B | Micron MT25QL128 Quad-SPI Flash (16 MB) | **FPGA Configuration Memory.** Intel MCS-86 formatted bitstream with synchronization word `0xAA995566`. Automatically loaded by the FPGA upon power-on. |
-| **`wildbits_jr2_6809_v8_rc16.bit`** | 2,192,140 B | FPGA JTAG / Program | Raw Xilinx Vivado Artix-7 bitstream. |
-| **`wildbits_jr2_6809_v8_rc16.bin`** | 2,192,012 B | FPGA Raw Binary | Raw FPGA programming binary. |
+| **`wildbits_jr2_6809_v8_rc17.mcs`** | 6,165,628 B | Micron MT25QL128 Quad-SPI Flash (16 MB) | **FPGA Configuration Memory.** Intel MCS-86 formatted bitstream with synchronization word `0xAA995566`. Automatically loaded by the FPGA upon power-on. |
+| **`wildbits_jr2_6809_v8_rc17.bit`** | 2,192,140 B | FPGA JTAG / Program | Raw Xilinx Vivado Artix-7 bitstream. |
+| **`wildbits_jr2_6809_v8_rc17.bin`** | 2,192,012 B | FPGA Raw Binary | Raw FPGA programming binary. |
 | **`f0` through `f4`** | 8,192 B ea. (40 KB total) | SST39 Parallel Flash (Sectors `$38–$3C`) | **FEU System Image (`/f0`).** Read-only RBF volume holding FEU utilities, `sysgo`, and the interactive startup menu. Corresponds to MMU blocks `$78–$7C`. |
 | **`f0.dsk`** | 40,960 B | Flash Disk Image | Raw disk image representing the combined `/f0` volume. |
 | **`booter`** | 24,576 B | Flash Booter Image | Raw binary representing the combined `booter_0`..`booter_2` volume. |
@@ -117,11 +119,15 @@ The official parity release kit for the Wildbits Jr2 Future (`parity_wildbits_jr
 | **`bulk.csv`** | 74 B | `fnxmgr.py` / FoenixMgr Utility | **Flash Allocation Map.** Directly maps blocks `f0`–`f4` to flash sectors `$38–$3C`, and `booter_0`–`booter_2` to sectors `$3D–$3F`. Preserves sectors `$00–$37` (`/f1`). |
 | **`foenixmgr.ini`** | 84 B | `fnxmgr.py` Utility | Flashing tool parameters: `port=COM4`, `flash_address=3F0000`, `cpu=6809`. |
 | **`install.bat`** | 211 B | Windows Batch File | Invokes `python ../fnxmgr.py --port COM4 --flash-bulk bulk.csv`. |
-| **`l2_wildbitsjr2_peak.dsk`** | 134,212,608 B (~128 MB) | External SPI SD Card (Port 0) | **NitrOS-9 Level 2 System Disk Image.** Formatted RBF filesystem incorporating all hardened drivers (`dwio_serial`, `wizfi` WizCon4, `rbmem`, `vtio` slot safety, DriveWire stack, VS1053 plugins, HIRES4 support). |
-| **`*.md` Release Reports** | 1.5–10.6 KB | Documentation | Comprehensive engineering reports covering MMU register window write fix (`rc16`), RAM window B identity mapping (`rc15`), HIRES4 and math remainder fix (`rc14`), video constraints and text LUT readback (`rc13`), fast writes and font/palette (`rc10`), DriveWire hardening, and MMU slot safety. |
+| **`l2_wildbitsjr2_peak.dsk`** | 134,212,608 B (~128 MB) | External SPI SD Card (Port 0) | **NitrOS-9 Level 2 System Disk Image.** Formatted RBF filesystem incorporating all hardened drivers (`dwio_serial`, `wizfi` WizCon4, `rbmem`, `vtio` slot safety, DriveWire stack, VS1053 plugins, HIRES4 support, RC17 `dmaxfer` Ed 3, `dmashow` Ed 3, and `linetest`). |
+| **`*.md` Release Reports** | 1.3–10.6 KB | Documentation | Comprehensive engineering reports covering line engine and DMA logic operations (`rc17`), MMU register window write fix (`rc16`), RAM window B identity mapping (`rc15`), HIRES4 and math remainder fix (`rc14`), video constraints and text LUT readback (`rc13`), fast writes and font/palette (`rc10`), DriveWire hardening, and MMU slot safety. |
 
-#### Disk Image Reconciliation (rc12 vs. rc16 Future Baseline):
+#### Disk Image Reconciliation (rc16 vs. rc17 Future Baseline):
 Inspection of `l2_wildbitsjr2_peak.dsk` and release packages reveals significant modernization updates:
+* **DMA Hardware Logic Operations:** New `DMA_OP_REG` at `$FED4` offering COPY (0), OR (1), AND (2), XOR (3), and MASK (4) operations, optional result inversion (`DMA_OP_NOT`, bit 3), and hardware implementation probe (`DMA_OP_Implemented`, bit 7). Tested by `CMDS/dmaxfer` (Edition 3) and `TESTS/dmashow` (Edition 3).
+* **DMA Bus Grant / Active / Drain Handshake:** Sequenced bus mastership prevents CPU and DMA from ever writing the same SRAM slot.
+* **Line Drawer Pixel Holding & Acceleration:** Bresenham FIFO pops (`LINEDRAW_AddyPixel_FIFO`) are held off around CPU access claims, and a video slot borrower accelerates rendering. Diagonal, shallow, and steep lines read back complete without lost pixels (`TESTS/linetest`).
+* **Turbo Fast I/O Writes (`TURBO_FASTIOWRITE`):** CPU writes to `$Cx` and VICKY register pages complete in 24-tick fast frames.
 * **Expanded RAM Architecture Support:** Kernel and drivers support 1 MB and up to 1,792 KB RAM using RAM Windows A (`$A0–$BF`) and B (`$D0–$EF`), with identity mapping where absolute address = block × $2000 (`vtio` `Blk2Addr`), plus FLASHDIS mode (`$FFA1` bit 2).
 * **MMU Register Window Isolation:** MMU registers at `$FFA0–$FFAF` no longer leak writes to physical SRAM in Slot 7.
 * **HIRES4 Graphics Mode:** 640 × 240 at 16 colors supported across bitmap planes with deterministic blanking-aligned dot phase.
@@ -163,7 +169,7 @@ The 21-bit physical address bus maps the following resources:
   * `$0800 - $08FF`: Gamma Red lookup table (256 bytes).
   * `$0C00 - $0CFF`: Hardware mouse cursor sprite bitmap (16 × 16, 256 bytes; `0` = transparent, `1` = black interior, `255` = white border).
   * `$1000 - $1013`: Bitmap plane control registers & 24-bit physical start addresses (`BM0`, `BM1`, `BM2`).
-  * `$1080 - $1087`: Line-Draw Accelerator (`TyVKY_LD_*`, Bresenham line-drawing engine with 4,096 × 32-bit pixel queue `LD_AddyPixel_FIFO` for 320 × 240 8 bpp graphics).
+  * `$1080 - $1087`: Line-Draw Accelerator (`TyVKY_LD_*`, Bresenham line-drawing engine with 4,096 × 32-bit pixel queue `LINEDRAW_AddyPixel_FIFO` for 320 × 240 8 bpp graphics; rc17 pixel holding and video slot borrower fix eliminates dropped pixels).
   * `$1100 - $119F`: Tilemap plane registers (`TL0`, `TL1`, `TL2`) and 8 tile set base address registers (`$1180–$119F`).
   * `$1300 - $16FF`: **128 Hardware Sprite Attribute Records** (8 bytes each, Big-Endian).
   * `$1700 - $177F`: Text Mode Palettes (Foreground CLUT at `$1700`, Background CLUT at `$1740`; fully shadowed and **readable by CPU** since rc13).
@@ -339,7 +345,7 @@ The following register map details every active hardware device decoded in the f
 | **`$FE90 - $FE91`** | `SDC0` (R/W) | **External SPI SD Card Port 0 (Main SD Slot, Top of PCB):**<br>• `$FE90`: Status/Control (`[7:SPI_BUSY, 1:SPI_CLK, 0:CS_EN]`)<br>• `$FE91`: `SPI_DATA` (Used by `llwbsd` for `/s0` and `/s1`) |
 | **`$FEA0 - $FEA8`** | `MOUSE` (R/W) | **Hardware Mouse Cursor:**<br>• `$FEA0`: `MS_MEN` (`[1:MODE (0:host, 1:hardware PS/2), 0:ENABLE]` - pixel rendering gated on bit 0)<br>• `$FEA2-$FEA3`: `MS_X` (16-bit X position)<br>• `$FEA4-$FEA5`: `MS_Y` (16-bit Y position)<br>• `$FEA6-$FEA8`: `PS2_BYTE_0..2` |
 | **`$FEB0 - $FEBF`** | `VIA0` (R/W) | **WDC 65C22 VIA 0:**<br>`IORB` (Joystick Port 0), `IORA` (Joystick Port 1), `DDRB`, `DDRA`, `T1CL/H`, `T1LL/H`, `T2CL/H`, `SR`, `ACR`, `PCR`, `IFR`, `IER`, `IORA2` |
-| **`$FEC0 - $FED7`** | `DMA` (R/W) | **TinyVicky DMA Controller:**<br>• `$FEC0`: `DMA_CTRL` (`[7:START, 6:DBL_SPEED/16-bit fill, 5:MASK_MSB, 4:MASK_LSB, 3:INT_EN, 2:FILL, 1:2D, 0:ENABLE]`)<br>• `$FEC1`: `DMA_STATUS` (R: `[7:BUSY]`, `b6:0` hardwired 0; idle = `$00`) / `DMA_FILL_BYTE` (W: 8-bit fill byte)<br>• `$FEC2-$FEC3`: `DMA_FILL_WORD_H/L` (16-bit fill word used when CTRL b6 is set)<br>• `$FEC5-$FEC7`: 24-bit Source Address (`SA_H`, `SA_M`, `SA_L`; `$FEC4` unused)<br>• `$FEC9-$FECB`: 24-bit Dest Address (`DA_H`, `DA_M`, `DA_L`; `$FEC8` unused)<br>• `$FECC-$FECD`: 16-bit X Size (`X_SIZE_H/L`; in 1D mode, bits 15:0 of 1D length)<br>• `$FECE-$FECF`: 16-bit Y Size (In 2D mode: row count; in 1D mode: `$FECF` is bits 23:16 of 1D length, `$FECE` is live 2D register ignored in 1D)<br>• `$FED0-$FED3`: 2D Strides (`SRC_STRIDE_H/L`, `DST_STRIDE_H/L`)<br>• `$FED4-$FED7`: Dead registers (read/write as ordinary bytes but drive nothing)<br>• *Hardware Readback Permutation:* Writes to `$FEC0–$FED7` are direct, but hardware readback permutes addresses per `tests/dma.asm`: `$FEC4–$FEC7` returns `$C7,$C6,$C5,$C4`; `$FEC8–$FECB` returns `$CB,$CA,$C9,$C8`; `$FECC–$FECF` returns `$CD,$CC,$CF,$CE`; `$FED0–$FED3` returns `$D1,$D0,$D3,$D2`; `$FED4–$FED7` returns `$D4–$D7`; `$FED8–$FEDF` returns `$FF`. |
+| **`$FEC0 - $FED7`** | `DMA` (R/W) | **TinyVicky DMA Controller:**<br>• `$FEC0`: `DMA_CTRL` (`[7:START, 6:DBL_SPEED/16-bit fill, 5:MASK_MSB, 4:MASK_LSB, 3:INT_EN, 2:FILL, 1:2D, 0:ENABLE]`)<br>• `$FEC1`: `DMA_STATUS` (R: `[7:BUSY]`, `b6:0` hardwired 0; idle = `$00`) / `DMA_FILL_BYTE` (W: 8-bit fill byte)<br>• `$FEC2-$FEC3`: `DMA_FILL_WORD_H/L` (16-bit fill word used when CTRL b6 is set)<br>• `$FEC4`: `DMA_UNUSED_0`<br>• `$FEC5-$FEC7`: 24-bit Source Address (`SA_H`, `SA_M`, `SA_L`, Big-Endian)<br>• `$FEC8`: `DMA_UNUSED_1`<br>• `$FEC9-$FECB`: 24-bit Dest Address (`DA_H`, `DA_M`, `DA_L`, Big-Endian)<br>• `$FECC-$FECD`: 16-bit X Size (`X_SIZE_H/L`; in 1D mode, bits 15:0 of 1D length)<br>• `$FECE-$FECF`: 16-bit Y Size (In 2D mode: row count; in 1D mode: `$FECF` is bits 23:16 of 1D length, `$FECE` is live 2D register ignored in 1D)<br>• `$FED0-$FED3`: 2D Strides (`SRC_STRIDE_H/L`, `DST_STRIDE_H/L`)<br>• `$FED4`: `DMA_OP_REG` (rc17 logic operations: `[b2:0: OP (0=COPY, 1=OR, 2=AND, 3=XOR, 4=MASK nibble transparency), b3: NOT invert (NOR/NAND/XNOR), b7: Implemented (R/O: 1 on rc17+)]`)<br>• `$FED5-$FED7`: Unused (read/write as ordinary bytes but drive nothing)<br>• *Hardware Readback Permutation:* Writes to `$FEC0–$FED7` are direct, but hardware readback permutes addresses per `tests/dma.asm`: `$FEC4–$FEC7` returns `$C7,$C6,$C5,$C4`; `$FEC8–$FECB` returns `$CB,$CA,$C9,$C8`; `$FECC–$FECF` returns `$CD,$CC,$CF,$CE`; `$FED0–$FED3` returns `$D1,$D0,$D3,$D2`; `$FED4–$FED7` returns `$D4–$D7`; `$FED8–$FEDF` returns `$FF`.<br>• *rc17 Handshake:* Bus grant, DMA active, and drain sequencing prevent CPU and DMA SRAM write collisions. |
 | **`$FEE0 - $FEFB`** | `MATH` (R/W) | **Hardware Integer Math Coprocessor:**<br>• `$FEE0-$FEE3`: `MULU_A_H/L`, `MULU_B_H/L` → `$FEF0-$FEF3`: `MULU_HH/HL/LH/LL` (16 × 16 → 32-bit unsigned multiply)<br>• `$FEE4-$FEE7`: `DIVU_SOR_H/L` (`$FEE4–$FEE5`, 16-bit divisor), `DIVU_END_H/L` (`$FEE6–$FEE7`, 16-bit dividend) → `$FEF4-$FEF5`: `QUOT_H/L` (16-bit quotient), `$FEF6-$FEF7`: `REM_H/L` (16-bit true remainder, rc14+) (16 / 16 → 16-bit unsigned divide)<br>• `$FEE8-$FEEF`: `ADD_A_HH..LL`, `ADD_B_HH..LL` → `$FEF8-$FEFB`: `ADD_R_HH..LL` (32-bit Add)<br>• *Note:* Writes to result addresses `$FEF0–$FEFB` land in operand registers (write decode ignores address bit 4). |
 | **`$FF00 - $FF01`** | `SDC1` (R/W) | **Internal SPI SD Card Port 1 (Micro-SD Slot, Bottom of PCB):**<br>• `$FF00`: Status/Control (`[7:SPI_BUSY, 1:SPI_CLK, 0:CS_EN]`)<br>• `$FF01`: `SPI_DATA` (shifts byte in/out) |
 | **`$FF10 - $FF18`** | `FL_DMA` (R/W) | **Splash / SPI Flash DMA Controller:**<br>• `$FF10`: Control (R: `[7:BUSY, 6:FIFO_EMPTY]`)<br>• `$FF11`: Flash Command Byte<br>• `$FF12-$FF13`: Receive FIFO Byte Count (12-bit)<br>• `$FF14-$FF16`: Flash 24-bit Source Address<br>• `$FF17`: Transfer Size / Control<br>• `$FF18`: FIFO Data Port (pops byte) |
@@ -568,10 +574,40 @@ Starting in `v8_rc14`, TinyVicky II incorporates the **HIRES4 high-resolution 16
 * **Fetch Timeout Protection:** Like the sprite engine, bitmap plane DMA fetches incorporate ~10–20 µs timeout aborts to prevent video pipeline lockups.
 
 #### 4. Hardware Line-Draw Accelerator (`TyVKY_LD_*`, Page `$C0` Offsets `$1080–$1087`):
-* Residing in sectored I/O Page `$C0` at offsets `$1080–$1087`, TinyVicky II incorporates a dedicated hardware **Bresenham line-drawing accelerator**:
-  * **Pixel Queue FIFO (`LD_AddyPixel_FIFO`):** Backed by a 4,096 × 32-bit common-clock FIFO (occupying 4 × RAMB36 tiles in FPGA block RAM).
-  * **Datapath:** The engine computes line trajectories and pushes `{color (8-bit), physical address (24-bit)}` pixel tuples directly into the queue.
-  * **Autonomous VRAM Writes:** Pixels waiting in the queue are drained and written directly into system SRAM without CPU intervention, accelerating 320 × 240 8 bpp line rendering.
+Residing in sectored I/O Page `$C0` at offsets `$1080–$1087`, TinyVicky II incorporates a dedicated hardware **Bresenham line-drawing accelerator** designed to render rapid vector lines directly into 320 × 240 (and 640 × 240 HIRES4) bitmap planes without CPU cycle overhead:
+
+* **Register Interface (Page `$C0` Offsets `$1080–$1087`):**
+  * **`$1080` (`TyVKY_LD_CTRL`):**
+    * **Write:** Bit 0 = `GO` (rising edge initiates Bresenham walk); Bits 3..2 = `Bitmap Layer Select` (`00` = BM0 `$1001–$1003`, `01` = BM1 `$1009–$100B`, `10` = BM2 `$1011–$1013`; base physical address is sourced directly from the selected bitmap plane, regardless of whether that layer is currently enabled for display).
+    * **Read:** Bit 7 = `TyVKY_LD_DONE` (`1` = line walk complete and engine idle; `0` = line generation active).
+  * **`$1081` (`TyVKY_LD_COLOR`):** 8-bit line pixel color written to destination VRAM.
+  * **`$1082 / $1083` (`TyVKY_LD_X0` / `TyVKY_LD_FIFO_COUNT`):**
+    * **Write:** 16-bit X0 start coordinate (high byte at `$1082`, low byte at `$1083`).
+    * **Read:** 16-bit FIFO count returning the exact number of pixel tuples waiting in the drain queue (`$1082` = count high, `$1083` = count low). X0 cannot be read back directly.
+  * **`$1084 / $1085` (`TyVKY_LD_X1` / `TyVKY_LD_X0_READ`):**
+    * **Write:** 16-bit X1 end coordinate (high byte at `$1084`, low byte at `$1085`).
+    * **Read:** Returns the latched X0 coordinate instead (reversed read order in `TinyVicky_BM_Registers.v`).
+  * **`$1086 / $1087` (`TyVKY_LD_Y0` / `TyVKY_LD_Y1`):**
+    * **Write:** `$1086` = 8-bit Y0 start coordinate; `$1087` = 8-bit Y1 end coordinate.
+    * **Read:** Swapped readback order (`$1086` returns Y1; `$1087` returns Y0).
+
+* **Coordinate Validation & Clipping Limits:**
+  * Coordinates are strictly validated against screen dimensions before line execution:
+    * Standard Mode: `X0`, `X1` must be $< 320$ (`TyVKY_LD_XMAX8`), `Y0`, `Y1` must be $< 240$ (`TyVKY_LD_YMAX`).
+    * HIRES4 Mode: `X0`, `X1` must be $< 640$ (`TyVKY_LD_XMAX4`), `Y0`, `Y1` must be $< 240$.
+  * If any endpoint coordinate equals or exceeds these bounds, the line draw trigger is completely ignored: the engine stays idle, and `DONE` never asserts.
+
+* **Handshake Protocol:**
+  * **Start Trigger:** The line draw begins strictly on the **rising edge** of `GO` (`CTRL[0]`).
+  * **Done Latch:** Once the Bresenham algorithm finishes walking the line endpoints, the hardware sets the `DONE` bit (`$1080` bit 7) and **parks in the done state until software writes `GO` back to 0**. Software must drop the `GO` bit low before initiating a subsequent line draw.
+  * **Pipeline Drain:** `DONE` indicates that the Bresenham algorithm has finished generating all pixel tuples; software can poll `TyVKY_LD_FIFO_COUNT` at `$1082/$1083` to verify that all queued pixels have drained into physical SRAM before re-allocating or reading the framebuffer.
+
+* **RC17 Dropped-Pixel Resolution & Acceleration (`v8_rc17`):**
+  * **Root Cause in RC16:** In rc16 and earlier cores, the line drawer dropped one or two pixels per bus frame during raster display or CPU memory access because FIFO pops could fire during ticks where the CPU still owned the SRAM bus.
+  * **RC17 Bus Gating:** In `v8_rc17`, the line drawer engine is strictly held off around the CPU read slot, fast-write hold, and stock late write.
+  * **`LINEDRAW_AddyPixel_FIFO` Rebuild:** The address/pixel FIFO (4 × RAMB36 BRAM tiles, 144 Kbit) was rebuilt so a queue pop never straddles the CPU's memory bus claim.
+  * **Video Slot Borrower:** Added a dynamic slot borrower (`line_fast` architecture) that awards idle video refresh cycles to the line engine, accelerating line rendering while guaranteeing zero pixel loss.
+  * **Verification:** Validated by NitrOS-9 `TESTS/linetest`: diagonal, shallow, and steep line vectors read back 100% complete with all pixels intact.
 
 ---
 
@@ -1319,7 +1355,7 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
 
 ### 7.14 TinyVicky Direct Memory Access (DMA) Engine (`$FEC0 - $FED7`)
 
-The FPGA implements a high-speed hardware DMA engine capable of executing linear memory copies, rectangular 2D block blits, and fast pattern fills across the entire 2 MB physical address space without CPU intervention.
+The FPGA implements a high-speed hardware DMA engine capable of executing linear memory copies, rectangular 2D block blits, and fast pattern fills across the entire 2 MB physical address space without CPU intervention. Starting in `v8_rc17`, the DMA engine features **Hardware Logic Operations** (`$FED4`) and a **hardened bus grant / drain handshake** eliminating SRAM access collision hazards.
 
 #### 1. Register Interface (Fixed I/O `$FEC0–$FED7`):
 * **`$FEC0` (`DMA_CTRL_REG`):**
@@ -1335,13 +1371,26 @@ The FPGA implements a high-speed hardware DMA engine capable of executing linear
   * Read: Bit 7 (`$80` = `DMA_STATUS_TRF_IP`) indicates transfer in progress (`1` = Busy, `0` = Idle/Complete; bits 6..0 hardwired 0; idle read is exactly `$00`).
   * Write: 8-bit fill byte value used when CTRL bit 2 is set and bit 6 is clear.
 * **`$FEC2 - $FEC3` (`DMA_FILL_WORD_H/L`):** 16-bit fill word value used during 16-bit fill operations (when CTRL bit 6 is set).
-* **`$FEC4 - $FEC6` (`DMA_SOURCE_ADDR_L/M/H`):** 24-bit physical source start address in Little-Endian byte order (`SA_L`, `SA_M`, `SA_H`; `$FEC7` is unused).
-* **`$FEC8 - $FECA` (`DMA_DEST_ADDR_L/M/H`):** 24-bit physical destination start address in Little-Endian byte order (`DA_L`, `DA_M`, `DA_H`; `$FECB` is unused).
+* **`$FEC4` (`DMA_UNUSED_0`):** Unused write address.
+* **`$FEC5 - $FEC7` (`DMA_SOURCE_ADDR_H/M/L`):** 24-bit physical source start address in Big-Endian byte order (`$FEC5` = `SA_H`, `$FEC6` = `SA_M`, `$FEC7` = `SA_L`).
+* **`$FEC8` (`DMA_UNUSED_1`):** Unused write address.
+* **`$FEC9 - $FECB` (`DMA_DEST_ADDR_H/M/L`):** 24-bit physical destination start address in Big-Endian byte order (`$FEC9` = `DA_H`, `$FECA` = `DA_M`, `$FECB` = `DA_L`).
 * **`$FECC - $FECD` (`DMA_X_SIZE_H/L`):** 16-bit block width (in bytes) in 2D mode; in 1D mode, bits 15:0 of the 24-bit 1D length.
 * **`$FECE - $FECF` (`DMA_Y_SIZE_H/L`):** 16-bit block height (row count) in 2D mode; in 1D mode, `$FECF` holds bits 23:16 of the 24-bit 1D length (`$FECE` is a live 2D register ignored in 1D).
 * **`$FED0 - $FED1` (`DMA_SRC_STRIDE_H/L`):** 16-bit source row stride (bytes added to source pointer at the end of each row in 2D mode).
 * **`$FED2 - $FED3` (`DMA_DST_STRIDE_H/L`):** 16-bit destination row stride (bytes added to destination pointer at the end of each row in 2D mode).
-* **`$FED4 - $FED7`:** Dead registers (read and write as ordinary bytes but drive no internal logic).
+* **`$FED4` (`DMA_OP_REG`, rc17):** Hardware DMA Logic Operations register:
+  * Bits 2:0 (`DMA_OP`): Operation select:
+    * `0` = `DMA_OP_COPY`: Plain memory copy ($S \to D$).
+    * `1` = `DMA_OP_OR`: Bitwise OR ($S \lor D$).
+    * `2` = `DMA_OP_AND`: Bitwise AND ($S \land D$).
+    * `3` = `DMA_OP_XOR`: Bitwise XOR ($S \oplus D$).
+    * `4` = `DMA_OP_MASK`: Per-nibble transparency mask (a source nibble of 0 retains the destination's nibble, treating color 0 as transparent paper).
+  * Bit 3 (`DMA_OP_NOT`): Inverts the result ($\neg(S \text{ op } D)$), yielding NOR, NAND, and XNOR with the operations above.
+  * Bit 7 (`DMA_OP_Implemented`, read-only): Reads `1` on cores implementing logic operations (probe before use; older cores return 0 and execute plain copy).
+  * Reset Value: `0` (plain copy).
+  * Bus Timing with Ops: With an op enabled, each byte transfer requires 3 bus cycles (read source / fill byte, read destination byte, write result), running at ~2.5x the duration of a plain copy. Functions identically for 1D, 2D, and fills.
+* **`$FED5 - $FED7`:** Unused (read and write as ordinary bytes but drive no internal logic).
 
 #### 2. Hardware Readback Permutation Signature:
 * While writes to `$FEC0–$FED7` land directly in internal registers (`VDMA_REG[Bus_A_i[4:0]] <= Bus_D_i`), the hardware read decode multiplexer (`TinyVKY_DMA_Reg_Block.v`) hands back permuted addresses for sixteen of the thirty-two locations (`tests/dma.asm`):
@@ -1352,21 +1401,27 @@ The FPGA implements a high-speed hardware DMA engine capable of executing linear
   * `$FED4–$FED7` readback returns `$D4, $D5, $D6, $D7`.
   * `$FED8–$FEDF` are decoded but unpopulated; reads return `$FF`.
 
-#### 3. Operational Rules & CPU-Halt Hazard:
+#### 3. Operational Rules, Handshake & Bus Hazard Resolution:
 * **Start Trigger:** Starting a transfer requires a rising edge on bit 7 (`Start_Trf`), and bit 0 (`DMA_Enable`) must already be high when the edge lands. Software must clear bit 7 back to 0 before starting another transfer.
 * **Completion Polling:** Completion is indicated by status bit 7 self-clearing to 0 (no write-1-to-clear required).
 * **Vertical Blanking Window Constraint:** Transfers only run during vertical blanking (~first 43 scanlines of each frame, ~8% of total frame time). A transfer started just after VBLANK closes moves no bytes for the remainder of the frame; software timeouts must accommodate at least two full frames (~40 ms).
 * **Fill Length Boundary:** Fills exceeding ~130 KB terminate prematurely while reporting success; software must chunk large fills well under 100 KB.
 * **Flat Physical Addressing:** The DMA engine accesses external SRAM directly, bypassing the 6809 MMU. Addresses are flat 24-bit physical addresses ($\text{Block} \times \$2000 + \text{Offset}$).
-* **CPU-Halt Handshake Hazard:** Starting a transfer asserts CPU halt and waits indefinitely for `BA` and `BS` to assert. If the handshake does not complete, the state machine hangs permanently, status bit 7 remains `$80`, and the CPU is halted every vertical blank for the remainder of the session (unrecoverable without hardware reset). NitrOS-9 `tests/dma` deliberately omits transfer starts to safeguard against system lockups.
+* **RC17 Bus Handshake & Hazard Elimination:**
+  * In `v8_rc17`, the bus grant (`Bus_Grant`), DMA active (`DMA_Active`), and drain sequence in the DMA controller, register block, and MMU are fully hardened:
+    * The engine requests the bus and begins only after the MMU scheduler has granted it and the previous halt acknowledgement has cleared.
+    * After the final byte, the DMA engine holds the bus request for **8 additional clock cycles** so its internal output pipeline drains completely before the CPU resumes.
+    * Every resumed burst repeats this handshake. `DMA_RDY` holds the CPU safely.
+    * As a result, the DMA transfer and the CPU never write the same SRAM slot.
+* **CPU-Halt Safety:** Starting a transfer asserts CPU halt and waits for `BA` and `BS` to assert. NitrOS-9 `tests/dma` probe verifies register layouts without starting transfers; `CMDS/dmaxfer` (Edition 3) exercises full 1D, 2D, fill, and logic operation blits.
 
 #### 4. Interrupt & Synchronization:
 * When a DMA operation concludes, the engine clears `DMA_STATUS_TRF_IP` (`$FEC1[7]`) and, if enabled (`$FEC0[3] = 1`), asserts `INT_DMA0` (`Group 0, bit 6`).
-* NitrOS-9 graphics utilities and `dmatest` verify synchronous polling or interrupt-driven completion.
+* NitrOS-9 graphics utilities, `dmatest`, and `dmaxfer` verify synchronous polling or interrupt-driven completion.
 
 ---
 
-### 7.15 Hardware Configuration, DIP Switches & Turbo Stretch Mode (`$FF90`)
+### 7.15 Hardware Configuration, DIP Switches, Turbo Stretch Mode & Fast I/O Writes (`$FF90`)
 
 The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** situated next to the power and reset switches on the Pico-ITX PCB. The live switch states are mapped to fixed I/O register **`$FF90`** (`DIP_SW`):
 
@@ -1376,8 +1431,10 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
 | **Bits 6..4** | `%01110000` | `SW_USER2..0` | General user-configurable DIP switches. |
 | **Bits 3..0** | `%00001111` | `SW_BOOT_MODE3..0` | Hardware boot source selection. **Bit 0 (`SW_BOOT_MODE0`)** serves as the **Turbo Gate** on `v8` cores: active-low in hardware (`0` = switch closed / Turbo stretch mode allowed; `1` = switch open / stock 6.29 MHz clock). |
 
-#### Turbo Stretch Mode (~1.4x) & `FASTWR_LATE2`:
+#### Turbo Stretch Mode (~1.4x), `FASTWR_LATE2` & `TURBO_FASTIOWRITE`:
 * **Operation:** In stock mode, the 6809 CPU core executes at 6.29 MHz with standard 32-tick bus frames. In Turbo stretch mode (enabled via DIP switch bit 0), instruction fetch frames are shortened to 24 ticks, achieving an effective CPU throughput of **~8.8 MHz (~1.4x speedup)** while keeping peripheral I/O frames at full length for timing safety (`TURBO_FASTWRITE`).
+* **Turbo Fast I/O Writes (`TURBO_FASTIOWRITE`, rc17):**
+  * Starting in `v8_rc17`, CPU writes to `$Cx` and VICKY register pages complete in a 24-tick fast frame like RAM writes instead of the stock 32-tick late-write slot. This significantly accelerates graphics setup, palette loads, and sprite configuration.
 * **`FASTWR_LATE2` Bus Timing Geometry (`v8_rc11`):**
   * The Jr2's external SRAM is an ISSI IS61WV102416FBLL-8BLI (1M × 16, 8ns). In early fast-write cores, write enable was asserted at tick 7, leaving only 5 ns of address setup from the MMU map registers, which could strobe stale addresses from the graphics engine's last fetch during background SD writes. This surfaced as video "sparklies" on displayed bitmaps.
   * `FASTWR_LATE2` delays write enable (`WE_n`) to ticks 9–11 of the write frame (slot released at tick 12), granting a full **15 ns address setup time**. Address pulse and hold times remain unchanged.
@@ -1799,8 +1856,8 @@ The following core peripheral and memory mapping revisions have been implemented
         8. Zero multiplication: 0.0 × 0.0 = 0.0 (`$00000000`), status `$10` with undriven zero bit staying 0
         9. Input fixed-to-float converter: 20.12 fixed 2.0 (`$00002000`) converted to float × 1.0 = 2.0 (`$40000000`)
 
-19. **RC16 Verification & Diagnostic Test Suite (`TESTS/*test`)**:
-    * Created and verified a comprehensive standalone test suite in NitrOS-9 `TESTS/`, where every executable test name ends in `test` (17 tests total):
+19. **RC17 Verification & Diagnostic Test Suite (`TESTS/*test`)**:
+    * Created and verified a comprehensive standalone test suite in NitrOS-9 `TESTS/`, where every executable test name ends in `test` (18 tests total):
       * `beamtest`: TinyVicky II Raster Beam Position Counter & Line Comparator Diagnostic (`$FFD8–$FFDB`), validating real-time beam scanning and comparator matching.
       * `cursortest`: TinyVicky II Master Video Controls (`$FFC0–$FFC1`) and Hardware Text Cursor (`$FFD0–$FFD7`) register readback and state preservation diagnostic.
       * `diptest`: Hardware Machine ID (`$FE07 = $1A` Jr2 6809 core), `SYS0`/`SYS1` system control registers (`$FE00–$FE01`), and motherboard hardware configuration DIP switches (`$FF90`) diagnostic.
@@ -1808,26 +1865,31 @@ The following core peripheral and memory mapping revisions have been implemented
       * `dmashowtest`: TinyVicky II hardware DMA visual demonstration (1D linear fill, 2D cascading rectangular windows with stride 320, 30 fps bouncing box blit, text overlay, and clean exit).
       * `drawtest`: TinyVicky II Bitmap 0 interactive mouse drawing and palette mapping test with clean exit on 'q'.
       * `fputest`: Hardware Floating-Point Unit probe testing all 9 arithmetic and converter checks (control, constant 1.0, 20.12 conversions, mul, div, add, sub, div-by-zero flag).
+      * `linetest`: TinyVicky II Hardware Line-Draw Accelerator Diagnostic (`TESTS/linetest`), verifying Bresenham line drawing across diagonal, shallow, and steep vectors with zero dropped pixels (`rc17`).
       * `mathtest`: Hardware Integer Math Coprocessor probe testing 16×16 multiplication, 32/16 division with true remainder, 32-bit addition, wrap, and write trap aliasing.
       * `memtest`: Memory block map ghosting test across the entire 1,792 KB SRAM address space, verifying all 224 RAM blocks real and distinct with zero ghosts.
       * `mmutest`: MMU LUT selector decoding (active vs. edit LUT), Constant RAM shadowing (`$FD00–$FDFF`), Vector RAM overlay (`$FFF0–$FFFF`), and cartridge decode (`$80–$9F`) isolation diagnostic.
-      * `rc16test`: Dedicated probe for all RC16 core changes (FLASHDIS implementation flag `$FFA1` bit 7, MMU register window isolation ensuring writes to `$FFA0–$FFAF` do not leak into Slot 7 RAM, FLASHDIS bit 2 enable/disable, Block `$40`/`$80` SRAM remapping, and Flash ROM write-protection).
+      * `rc16test`: Dedicated probe for RC16 core changes (FLASHDIS implementation flag `$FFA1` bit 7, MMU register window isolation ensuring writes to `$FFA0–$FFAF` do not leak into Slot 7 RAM, FLASHDIS bit 2 enable/disable, Block `$40`/`$80` SRAM remapping, and Flash ROM write-protection).
       * `rtctest`: bq4802 Real-Time Clock register interface (`$FE40–$FE4F`) and non-volatile battery-backed NVRAM registers diagnostic.
       * `sprregtest`: Hardware TinyVicky 128 Sprite register probe testing attribute records in Page `$C0` (`$1300–$16FF`), 16-bit coordinates, and master video sprite enable.
       * `sprtest`: Hardware TinyVicky 128 bouncing sprites engine animation test (mirrors `sprtest2`/`sprtest128`, loading LUT1 palette sweep, allocating 8 KB bitmap buffers, and animating up to 128 bouncing sprites at ~30 fps with clean exit on any key).
       * `timertest`: 24-bit Timers (Timer 0 up-counter and Timer 1 frame clock at `$FE32–$FE3F`) and INTC 4-Group interrupt mask, edge, and W1C pending registers diagnostic (`$FE20–$FE3F`).
       * `tltest`: TinyVicky II Hardware Scrolling Tilemap Engine diagnostic, allocating two 16×16 pixel tiles, populating a 20×15 tile matrix, routing TL0 to Layer 0 (`$FFC2`), enabling tilemap display (`$FFC0 = $17`), diagonally scrolling the playfield, and cleanly restoring text mode after animation or on ESC.
       * `uarttest`: 16550 UART hardware registers (`$FE60–$FE67`) and INTC Group 1 UART interrupt request line diagnostic.
+    * Upgraded `CMDS/dmaxfer` to Edition 3 and `TESTS/dmashow` to Edition 3, thoroughly exercising the new RC17 DMA logic operations (`DMA_OP_REG` at `$FED4`).
     * Added separate CPU read and write bank creators (`m_bank_r` and `m_bank_w`) in `src/mame/wildbits/wildbits_jr2.cpp`, ensuring Flash ROM (`$40–$7F`) when `FLASHDIS=0` correctly discards CPU writes to an unmapped buffer while allowing SRAM writes when `FLASHDIS=1`.
 
 ---
 
-### 10.3 Completed & Verified Features: rc16 Revisit & Action Analysis
+### 10.3 Completed & Verified Features: rc17 Revisit & Action Analysis
 
-Based on the release of authoritative firmware core **`wildbits_jr2_6809_v8_rc16`** (core built 2026-09-13 21:36; future kit built 2026-09-14 02:12) and the accompanying Nitrobotics engineering reports, each system and peripheral subsystem has been audited to determine its current status and required actions for the MAME `wbjr2` emulator:
+Based on the release of authoritative firmware core **`wildbits_jr2_6809_v8_rc17`** (core built 2026-09-23 17:51, recipe `fpga/build_jr2_rc17_line_fast_2.tcl`, WNS +0.019 ns; future kit built 2026-09-24 11:15) and the accompanying Nitrobotics engineering reports, each system and peripheral subsystem has been audited to determine its current status and required actions for the MAME `wbjr2` emulator:
 
-| Subsystem | rc16 Hardware / Firmware Change | Status in MAME Emulator | Required Action / Analysis |
+| Subsystem | rc17 Hardware / Firmware Change | Status in MAME Emulator | Required Action / Analysis |
 | :--- | :--- | :--- | :--- |
+| **TinyVicky DMA Controller & Logic Ops** | Register map at `$FEC0–$FED7` with Big-Endian address registers (`$FEC5–$FEC7` source H/M/L, `$FEC9–$FECB` dest H/M/L; `$FEC4` and `$FEC8` unused), non-contiguous 1D size (`$FECC–$FECD` low, `$FECF` high), 16-bit word fill from `$FEC2–$FEC3` (`CTRL[6]`), byte-lane masks (`CTRL[5:4]`). **RC17 `DMA_OP_REG` at `$FED4`** supporting COPY (0), OR (1), AND (2), XOR (3), MASK (4) nibble transparency, NOT invert bit 3, and probe bit 7 (`DMA_OP_Implemented`). **RC17 bus grant / active / drain handshake** holding bus for 8 clocks post-transfer to drain output pipeline, preventing CPU/DMA SRAM slot collisions. Direct register writes; readback permutation on `$FEC4–$FED7` (`tests/dma.asm`). Transfers run during VBLANK (~43 lines), asserting CPU halt. | **Completed & Verified** | **Completed & Verified:** Full 1D copy/fill, 2D copy/fill with strides, Big-Endian addresses, and `$FED4` `DMA_OP_REG` logic operations (COPY, OR, AND, XOR, MASK, NOT) implemented in `src/mame/wildbits/wildbits_jr2.cpp`. Verified with `CMDS/dmaxfer` (Edition 3) and `TESTS/dmashow` (Edition 3). |
+| **TinyVicky Hardware Line-Draw Accelerator** | Hardware line-drawing engine (`TyVKY_LD_*`) in Page `$C0` at offsets `$1080–$1087` writing into 4,096 × 32-bit pixel FIFO (`LINEDRAW_AddyPixel_FIFO`). **RC17 pixel holding fix**: engine is held off around CPU read slots, fast-write holds, and stock late writes, preventing straddling pops. Video slot borrower accelerates rendering. Coordinate checks ($<320$ or $<640$ in HIRES4, $<240$). Handshake: rising edge on GO starts walk, engine parks in DONE state (`$1080` bit 7) until GO bit is written back to 0. FIFO count at `$1082/$1083`. | *Hardware Feature* | **Emulator Action:** If hardware line accelerator is emulated, decode Page `$C0` offsets `$1080–$1087` for start/end coordinates and color, drawing Bresenham lines directly to system SRAM framebuffer. Verified on hardware with NitrOS-9 `TESTS/linetest`. |
+| **Turbo Fast I/O Writes (`TURBO_FASTIOWRITE`)** | CPU writes to `$Cx` and VICKY register pages complete in 24-tick fast frames like RAM writes instead of the stock 32-tick late-write slot, accelerating display setup. | **Completed & Verified** | **Emulator Action:** In `wildbits_jr2.cpp`, ensure writes to `$Cx` / VICKY register pages complete in fast-write cycles without unnecessary wait-state stretching. |
 | **MMU Register Window Isolation** | CPU writes to task/LUT registers (`$FFA0–$FFAF`) are actively inhibited from physical Slot 7 RAM (`Slot 7 Block × $2000 + $1FA0–$1FAF`) via `RAM_Access_Inhibit`. | **Completed & Verified** | **Completed & Verified:** Verified with `rc16test` Check 2. In `wbjr2_mem()`, dedicated memory handlers for `$FFA0–$FFAF` and `$FF00–$FFEF` prevent any register write from leaking into Slot 7 backing RAM. |
 | **1,792 KB Physical SRAM & FLASHDIS** | `FLASHDIS` bit (`$FFA1` bit 2) remaps Blocks `$40–$9F` to SRAM (`0x080000–0x13FFFF`, 768 KB), yielding 1,792 KB total RAM; bit 7 read-only indicates FLASHDIS implementation. | **Completed & Verified** | **Completed & Verified:** Verified with `rc16test` (Checks 1, 3, 4, 5, 6, 7) and `memtest` (211/211 free RAM blocks distinct, 0 ghosts). Flash ROM writes when FLASHDIS=0 are write-protected via separate read/write bank mapping (`m_bank_r`/`m_bank_w`), and remap to SRAM when FLASHDIS=1. |
 | **RAM Window B Identity Address** | Corrected in rc15 from rc14's `$200000` to identity address `0x1A0000–0x1DFFFF` (Block × $2000); removes `+$30` block offset in `vtio` `Blk2Addr`. | **Verified Requirement** | **Emulator Action:** Physical block mapping for Window B (`$D0–$EF`) must map linearly to `0x1A0000–0x1DFFFF` (Block × $2000) for CPU, TinyVicky, DMA, and debug port without any offset. |
@@ -1838,13 +1900,11 @@ Based on the release of authoritative firmware core **`wildbits_jr2_6809_v8_rc16
 | **SAM2695 MIDI Interface** | Edition 2 register block across 10 bytes at `$FF30–$FF39` (`MIDI_CTRL`, `MIDI_DATA`, and Rx/Tx FIFO counters). Aligned with `v8_rc11`+ FIFO status flags, data port, and software reset toggle. | **Completed & Verified** | **Emulator Action:** Decodes 10-byte register block at `$FF30–$FF39` (`$FF30` status/ctrl, `$FF31` data, `$FF32–$FF39` 16-bit counters). Software reset bit 1 self-clearing. |
 | **Text Color LUT CPU Readability** | Text foreground at `$1700` and background at `$1740` in Page `$C0` shadowed and readable by CPU; pre-loaded with OS-9 palette; dumped via `lutrd`. | **Verified Requirement** | **Emulator Action:** Ensure reads from Page `$C0` offsets `$1700–$173F` and `$1740–$177F` return the 4-byte `[B, G, R, A]` palette entries rather than open-bus. |
 | **TinyVicky Fetch Timeout Aborts** | Fetch timeouts (~10–20 µs) in sprite and bitmap DMA state machines abandon stalled memory fetches, dropping one line instead of freezing the video pipeline. | **Verified Requirement** | **Emulator Action:** MAME line-by-line rasterization naturally avoids infinite bus stalls, matching the timeout abort behavior. |
-| **TinyVicky DMA Controller** | Register map at `$FEC0–$FED7` with non-contiguous 1D size (`$FECC–$FECD` low, `$FECF` high), 16-bit word fill from `$FEC2–$FEC3` (`CTRL[6]`), byte-lane masks (`CTRL[5:4]`). Hardware readback permutation on `$FEC4–$FED7` (`tests/dma.asm`), `$FED8–$FEDF` returns `$FF`. Direct register writes. Transfers execute strictly during vertical blanking interval (~43 scanlines), asserting CPU halt (`BA`/`BS`). | **Completed & Verified** | **Completed & Verified:** Full 1D copy/fill, 2D copy/fill with strides, bus pausing, and interrupt generation verified with NitrOS-9 `dmatest` (5/5 tests passing). For full cycle accuracy, emulate VBLANK execution gating, BA/BS handshake, and readback address permutation signature. |
-| **TinyVicky Hardware Line-Draw Accelerator** | Hardware line-drawing engine (`TyVKY_LD_*`) in Page `$C0` at offsets `$1080–$1087` writing into 4,096 × 32-bit pixel FIFO (`LD_AddyPixel_FIFO`). | *Hardware Feature* | **Emulator Action:** If hardware line accelerator is emulated, decode Page `$C0` offsets `$1080–$1087` for start/end coordinates and color, drawing Bresenham lines directly to system SRAM framebuffer. |
 | **VS1053b MP3 Decoder** | Clock divided to **12.288 MHz**; fixed register offset decode at `$FF50–$FF57`; dual-speed SPI (1.57 / 6.29 MHz); GPIO1 boot strap workaround via `switcher.plg` and `vs` Edition 12. | **Completed & Verified** | **Completed & Verified:** Implemented FPGA SPI bridge and SCI/SDI register interface (`VS_CTRL` at `$FF50`, `VS_SCIREG` at `$FF51`, `VS_DATAHI/LO` at `$FF52–$FF53`, `VS_FIFOSTAT/CNTL` at `$FF54–$FF55`, `VS_FIFO` at `$FF57`). Verified with NitrOS-9 `vs` test chain (`vs 1`), memory test (`vs -m`, returning HDAT0 `$83FF`), info query (`vs -i`), and audio streaming (`vs -d SOUNDS/piano1.mid`). |
 | **WM8776 Audio CODEC** | `vtio` InitCODEC sequence writes R03=`$07FD`, R04=`$09FD` (-1.0 dB DAC attenuation), R00=`$0160`, R01=`$0360` (-25 dB headphone attenuation), and R21=`$2A1F` (`$1F`), unmasking all 5 analog inputs so VS1053 outputs on AIN3..5 reach the mixer; audio leveling in `wb/play`. | *Planned* (`MACHINE_NO_SOUND_HW`) | **Must be revisited before implementation:** Emulate WM8776 register writes via `$FE70–$FE72` (R00/R01 headphone volume, R03/R04 DAC volume, R21 analog mux). Ensure AIN3..5 are routed from VS1053b audio outputs into the WM8776 master mixing bus. |
 | **16550 UART / DriveWire** | Hardened driver stack (`wb/DriveWireCompatible`, `rbdw` `$252`, `dwio_serial` `$37A`): bounded transmit wait, `ReadAbort` error framing, `PurgeRX` with FCR RX-FIFO reset, trailing-byte check on status OK. | **Completed & Verified** | **Revisited & Verified:** MAME UART emulation supports exact divisor 5 (230,400 baud) and handles FCR bit 1 FIFO clearing. Tested against pyDriveWire / DW4 server with zero frame slipping or lockups. |
 | **PS/2 Mouse & Cursor** | Hardware pixel gating on `$FEA0` bit 0; cursor unhiding restores previous coordinates instead of resetting to right border (`wb/mouse_hide_unhide`). | **Completed & Verified** | **Revisited & Verified:** MAME relative mouse input handler (`poll_mouse()`) and host cursor suppression fully align with `wb/mouse_hide_unhide` coordinate restoration. |
-| **Built-in Font & Palette** | Embedded BRAM assets in `mif/Font_OS9_bannerfont.coe` and `mif/Text_LUT_OS9_palette.coe`. | **Completed & Verified** | **Revisited & Confirmed Unchanged:** Binary analysis of `wildbits_jr2_6809_v8_rc16.mcs` confirms that BRAM preloads are **100% byte-identical** to rc10, rc11, and rc12. Embedded assets in `wildbits_jr2.cpp` require **no changes**. |
+| **Built-in Font & Palette** | Embedded BRAM assets in `mif/Font_OS9_bannerfont.coe` and `mif/Text_LUT_OS9_palette.coe`. | **Completed & Verified** | **Revisited & Confirmed Unchanged:** Binary analysis of `wildbits_jr2_6809_v8_rc17.mcs` confirms that BRAM preloads are **100% byte-identical** to rc10, rc11, rc12, and rc16. Embedded assets in `wildbits_jr2.cpp` require **no changes**. |
 | **MMU Slot Safety (`wb/flink_fix`)** | Prevents modules >= `$1D00` from mapping into Slot 7, accommodating the 3-page ($300 bytes) fixed I/O space at `$FD00–$FFFF`. | **Completed & Verified** | **Revisited & Verified:** MAME's MMU translation correctly maintains fixed decodes at `$FD00–$FFFF` and runs NitrOS-9 modules with the 3-page clearance. |
 | **TinyVicky Sprites & Tilemaps** | 128 hardware sprites with 4-level interleaving depth; 3 scrolling tilemap planes (`TL0..TL2`) with 8 tile sets (`TS0..TS7`). | **Completed & Verified** | **Completed & Verified:** Verified 128 sprites via `sprtest2` and 3 scrolling tilemaps via `tltest`. |
-| **Timing Closure & Fast Writes** | `FASTWR_LATE2` write slot (ticks 9..11, 15 ns setup); bus-grant crossing bounded to 4.5 ns; WNS closes at +0.173 ns, WHS at +0.004 ns, zero failing endpoints. | **Completed & Verified** | **Revisited & Confirmed:** Timing closure and bus grant constraints ensure rock-solid video and SRAM access without display artifacts. |
+| **Timing Closure & Fast Writes** | `FASTWR_LATE2` write slot (ticks 9..11, 15 ns setup); `TURBO_FASTIOWRITE` 24-tick VICKY register writes; bus-grant crossing bounded to 4.5 ns; WNS closes at +0.019 ns, zero failing endpoints (`v8_rc17`). | **Completed & Verified** | **Revisited & Confirmed:** Timing closure and bus grant constraints ensure rock-solid video and SRAM access without display artifacts. |
