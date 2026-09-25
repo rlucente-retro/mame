@@ -2139,10 +2139,61 @@ void wildbits_jr2_state::dma_execute()
 	bool is_2d = (m_dma_reg[0] & 0x02) != 0;
 	bool is_fill = (m_dma_reg[0] & 0x04) != 0;
 	bool int_en = (m_dma_reg[0] & 0x08) != 0;
+	bool is_16bit_fill = (m_dma_reg[0] & 0x40) != 0;
 
-	uint32_t src = ((uint32_t)m_dma_reg[6] << 16) | ((uint32_t)m_dma_reg[5] << 8) | m_dma_reg[4];
-	uint32_t dst = ((uint32_t)m_dma_reg[10] << 16) | ((uint32_t)m_dma_reg[9] << 8) | m_dma_reg[8];
+	// Byte-lane mask: either bit set causes transfer to complete writing nothing
+	if (m_dma_reg[0] & 0x30)
+	{
+		m_dma_status = 0x00;
+		if (int_en)
+			set_irq(0, 0x40);
+		return;
+	}
+
+	// Big-Endian 24-bit physical addresses:
+	// Source: $FEC5 (H), $FEC6 (M), $FEC7 (L) [$FEC4 is unused]
+	// Dest:   $FEC9 (H), $FECA (M), $FECB (L) [$FEC8 is unused]
+	uint32_t src = ((uint32_t)m_dma_reg[5] << 16) | ((uint32_t)m_dma_reg[6] << 8) | m_dma_reg[7];
+	uint32_t dst = ((uint32_t)m_dma_reg[9] << 16) | ((uint32_t)m_dma_reg[10] << 8) | m_dma_reg[11];
 	uint8_t fill_byte = m_dma_reg[1];
+
+	// RC17 DMA logic operations ($FED4)
+	uint8_t op_reg = m_dma_reg[20];
+	uint8_t op = op_reg & 0x07;
+	bool op_not = (op_reg & 0x08) != 0;
+	bool has_logic_op = (op != 0) || op_not;
+
+	auto apply_op = [op, op_not](uint8_t s, uint8_t d) -> uint8_t {
+		uint8_t r;
+		switch (op)
+		{
+		case 0: // COPY
+			r = s;
+			break;
+		case 1: // OR
+			r = s | d;
+			break;
+		case 2: // AND
+			r = s & d;
+			break;
+		case 3: // XOR
+			r = s ^ d;
+			break;
+		case 4: // MASK (per-nibble: source nibble 0 retains destination nibble)
+		{
+			uint8_t hi = (s & 0xf0) ? (s & 0xf0) : (d & 0xf0);
+			uint8_t lo = (s & 0x0f) ? (s & 0x0f) : (d & 0x0f);
+			r = hi | lo;
+			break;
+		}
+		default:
+			r = s;
+			break;
+		}
+		if (op_not)
+			r = ~r;
+		return r;
+	};
 
 	m_dma_status = 0x80; // Transfer in progress
 
@@ -2158,18 +2209,38 @@ void wildbits_jr2_state::dma_execute()
 			{
 				for (uint32_t i = 0; i < count; i++)
 				{
-					dma_write_byte((dst + i) & 0x1fffff, fill_byte);
+					uint32_t d_addr = (dst + i) & 0x1fffff;
+					uint8_t fb = is_16bit_fill ? ((i & 1) ? m_dma_reg[3] : m_dma_reg[2]) : fill_byte;
+					if (has_logic_op)
+					{
+						uint8_t d_val = dma_read_byte(d_addr);
+						dma_write_byte(d_addr, apply_op(fb, d_val));
+					}
+					else
+					{
+						dma_write_byte(d_addr, fb);
+					}
 				}
-				cycles = count / 16; // ~100MB/s at 6.29MHz
+				cycles = has_logic_op ? (count / 6) : (count / 16);
 			}
 			else
 			{
 				for (uint32_t i = 0; i < count; i++)
 				{
-					uint8_t byte = dma_read_byte((src + i) & 0x1fffff);
-					dma_write_byte((dst + i) & 0x1fffff, byte);
+					uint32_t s_addr = (src + i) & 0x1fffff;
+					uint32_t d_addr = (dst + i) & 0x1fffff;
+					uint8_t s_val = dma_read_byte(s_addr);
+					if (has_logic_op)
+					{
+						uint8_t d_val = dma_read_byte(d_addr);
+						dma_write_byte(d_addr, apply_op(s_val, d_val));
+					}
+					else
+					{
+						dma_write_byte(d_addr, s_val);
+					}
 				}
-				cycles = count / 5; // ~33MB/s at 6.29MHz
+				cycles = has_logic_op ? (count / 2) : (count / 5);
 			}
 		}
 	}
@@ -2190,21 +2261,41 @@ void wildbits_jr2_state::dma_execute()
 			{
 				for (uint16_t x = 0; x < width; x++)
 				{
-					dma_write_byte((row_dst + x) & 0x1fffff, fill_byte);
+					uint32_t d_addr = (row_dst + x) & 0x1fffff;
+					uint8_t fb = is_16bit_fill ? ((x & 1) ? m_dma_reg[3] : m_dma_reg[2]) : fill_byte;
+					if (has_logic_op)
+					{
+						uint8_t d_val = dma_read_byte(d_addr);
+						dma_write_byte(d_addr, apply_op(fb, d_val));
+					}
+					else
+					{
+						dma_write_byte(d_addr, fb);
+					}
 				}
 			}
 			else
 			{
 				for (uint16_t x = 0; x < width; x++)
 				{
-					uint8_t byte = dma_read_byte((row_src + x) & 0x1fffff);
-					dma_write_byte((row_dst + x) & 0x1fffff, byte);
+					uint32_t s_addr = (row_src + x) & 0x1fffff;
+					uint32_t d_addr = (row_dst + x) & 0x1fffff;
+					uint8_t s_val = dma_read_byte(s_addr);
+					if (has_logic_op)
+					{
+						uint8_t d_val = dma_read_byte(d_addr);
+						dma_write_byte(d_addr, apply_op(s_val, d_val));
+					}
+					else
+					{
+						dma_write_byte(d_addr, s_val);
+					}
 				}
 			}
 		}
 
 		uint32_t total_bytes = (uint32_t)width * height;
-		cycles = is_fill ? (total_bytes / 16) : (total_bytes / 5);
+		cycles = is_fill ? (has_logic_op ? (total_bytes / 6) : (total_bytes / 16)) : (has_logic_op ? (total_bytes / 2) : (total_bytes / 5));
 	}
 
 	if (cycles > 0)
@@ -2245,7 +2336,7 @@ uint8_t wildbits_jr2_state::dma_r(offs_t offset)
 	case 17: return m_dma_reg[16];
 	case 18: return m_dma_reg[19];
 	case 19: return m_dma_reg[18];
-	case 20: return m_dma_reg[20];
+	case 20: return (m_dma_reg[20] & 0x0f) | 0x80; // Bit 7: DMA_OP_Implemented
 	case 21: return m_dma_reg[21];
 	case 22: return m_dma_reg[22];
 	case 23: return m_dma_reg[23];
@@ -2259,14 +2350,20 @@ void wildbits_jr2_state::dma_w(offs_t offset, uint8_t data)
 	if (offset == 0)
 	{
 		// Hardware state machine:
-		// Starting a transfer requires a rising edge on bit 7 (Start_Trf: 0 -> 1).
+		// Starting a transfer requires a rising edge on bit 7 (Start_Trf: 0 -> 1)
+		// and bit 0 (DMA_Enable) must be set.
 		// Software must clear bit 7 back to 0 before starting another transfer.
-		bool rising_start = (data & 0x80) && !(m_dma_reg[0] & 0x80);
+		bool rising_start = (data & 0x80) && !(m_dma_reg[0] & 0x80) && (data & 0x01);
 		m_dma_reg[0] = data;
 		if (rising_start)
 		{
 			dma_execute();
 		}
+	}
+	else if (offset == 20)
+	{
+		// DMA_OP_REG: bits 3:0 writable, bit 7 read-only
+		m_dma_reg[20] = data & 0x0f;
 	}
 	else if (offset < 24)
 	{
