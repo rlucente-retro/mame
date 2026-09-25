@@ -302,6 +302,9 @@ private:
 	void update_line_timer();
 	TIMER_CALLBACK_MEMBER(scanline_tick);
 
+	// Hardware Line-Draw Accelerator ($1080 - $1087 in Page $C0, $FFCA)
+	void linedraw_execute();
+
 	void io_wait(int cycles = 0);
 	bool m_is_turbo;
 	uint8_t m_io_wait_counter;
@@ -468,6 +471,17 @@ private:
 	uint16_t m_vky_line_cmp;
 	uint8_t m_vky_lint_ctrl;
 	emu_timer *m_scanline_timer;
+
+	// TinyVicky Hardware Line-Draw Accelerator ($1080 - $1087 in Page $C0, $FFCA)
+	uint8_t m_vky_drawline_ctrl;
+	uint8_t m_ld_ctrl;
+	uint8_t m_ld_color;
+	uint16_t m_ld_x0;
+	uint16_t m_ld_x1;
+	uint8_t m_ld_y0;
+	uint8_t m_ld_y1;
+	bool m_ld_done;
+	uint16_t m_ld_fifo_count;
 
 	// Keyboard, DIP Switch & Mouse Input Ports
 	required_ioport_array<4> m_io_key;
@@ -2387,6 +2401,7 @@ uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 	case 0x07: return m_vky_brdr_r;
 	case 0x08: return m_vky_brdr_w;
 	case 0x09: return m_vky_brdr_h;
+	case 0x0a: return m_vky_drawline_ctrl;
 	case 0x0b: return m_vky_gfx_mode;
 	case 0x0d: return m_vky_bg_b;
 	case 0x0e: return m_vky_bg_g;
@@ -2408,7 +2423,8 @@ uint8_t wildbits_jr2_state::vky_r(offs_t offset)
 
 void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 {
-	io_wait();
+	// TURBO_FASTIOWRITE: CPU writes to VICKY register pages complete in fast frames
+	// without peripheral cycle stretching.
 	switch (offset)
 	{
 	case 0x00:
@@ -2433,6 +2449,7 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 	case 0x07: m_vky_brdr_r = data; break;
 	case 0x08: m_vky_brdr_w = data & 0x1f; break;
 	case 0x09: m_vky_brdr_h = data & 0x1f; break;
+	case 0x0a: m_vky_drawline_ctrl = data; break;
 	case 0x0b: m_vky_gfx_mode = data & 0x0f; break; // HIRES4 mode & CLUT group
 	case 0x0d: m_vky_bg_b = data; break;
 	case 0x0e: m_vky_bg_g = data; break;
@@ -2458,6 +2475,83 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 		break;
 	default: break;
 	}
+}
+
+void wildbits_jr2_state::linedraw_execute()
+{
+	int bm_sel = (m_ld_ctrl >> 2) & 0x03;
+	uint8_t bm_ctrl = (bm_sel == 0) ? m_vram_c0[0x1000] : (bm_sel == 1) ? m_vram_c0[0x1008] : (bm_sel == 2) ? m_vram_c0[0x1010] : 0;
+	bool hires4 = (m_vky_gfx_mode & 0x01) || (bm_ctrl & 0x10);
+	uint16_t xmax = hires4 ? 640 : 320;
+
+	if (m_ld_x0 >= xmax || m_ld_x1 >= xmax || m_ld_y0 >= 240 || m_ld_y1 >= 240)
+	{
+		// Coordinate checks: X < 320 (or < 640 in HIRES4), Y < 240.
+		// If out of bounds, trigger ignored and DONE never asserts.
+		return;
+	}
+
+	uint32_t bm_base = 0;
+	if (bm_sel == 0)
+		bm_base = ((uint32_t)m_vram_c0[0x1001] << 16) | ((uint32_t)m_vram_c0[0x1002] << 8) | m_vram_c0[0x1003];
+	else if (bm_sel == 1)
+		bm_base = ((uint32_t)m_vram_c0[0x1009] << 16) | ((uint32_t)m_vram_c0[0x100a] << 8) | m_vram_c0[0x100b];
+	else if (bm_sel == 2)
+		bm_base = ((uint32_t)m_vram_c0[0x1011] << 16) | ((uint32_t)m_vram_c0[0x1012] << 8) | m_vram_c0[0x1013];
+	else
+		bm_base = 0x001000;
+
+	bool enabled = (m_vky_drawline_ctrl & 0x01) || (m_ld_ctrl & 0x01);
+
+	auto plot_pixel = [&](int x, int y) {
+		if (!enabled)
+			return;
+		if (hires4)
+		{
+			uint32_t addr = (bm_base + y * 320 + (x / 2)) & 0x1fffff;
+			if (x & 1)
+				m_ram[addr] = (m_ram[addr] & 0xf0) | (m_ld_color & 0x0f);
+			else
+				m_ram[addr] = (m_ram[addr] & 0x0f) | ((m_ld_color & 0x0f) << 4);
+		}
+		else
+		{
+			uint32_t addr = (bm_base + y * 320 + x) & 0x1fffff;
+			m_ram[addr] = m_ld_color;
+		}
+	};
+
+	int x0 = m_ld_x0;
+	int y0 = m_ld_y0;
+	int x1 = m_ld_x1;
+	int y1 = m_ld_y1;
+
+	int dx = std::abs(x1 - x0);
+	int dy = std::abs(y1 - y0);
+	int sx = (x0 < x1) ? 1 : -1;
+	int sy = (y0 < y1) ? 1 : -1;
+	int err = dx - dy;
+
+	while (true)
+	{
+		plot_pixel(x0, y0);
+		if (x0 == x1 && y0 == y1)
+			break;
+		int e2 = 2 * err;
+		if (e2 > -dy)
+		{
+			err -= dy;
+			x0 += sx;
+		}
+		if (e2 < dx)
+		{
+			err += dx;
+			y0 += sy;
+		}
+	}
+
+	m_ld_done = true;
+	m_ld_fifo_count = 0;
 }
 
 void wildbits_jr2_state::update_line_timer()
@@ -3684,11 +3778,124 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_fpu_in1));
 	save_item(NAME(m_dma_reg));
 	save_item(NAME(m_dma_status));
+	save_item(NAME(m_vky_drawline_ctrl));
+	save_item(NAME(m_ld_ctrl));
+	save_item(NAME(m_ld_color));
+	save_item(NAME(m_ld_x0));
+	save_item(NAME(m_ld_x1));
+	save_item(NAME(m_ld_y0));
+	save_item(NAME(m_ld_y1));
+	save_item(NAME(m_ld_done));
+	save_item(NAME(m_ld_fifo_count));
 	save_item(NAME(m_is_turbo));
 	save_item(NAME(m_io_wait_counter));
 	save_item(NAME(m_last_mouse_x));
 	save_item(NAME(m_last_mouse_y));
 	save_item(NAME(m_last_mouse_btn));
+
+	// Hardware Line-Draw Accelerator taps on CPU address space for Page $C0 ($1080 - $10FF)
+	m_maincpu->space(AS_PROGRAM).install_read_tap(0x0000, 0xffff, "wbjr2_ld_r",
+		[this](offs_t offset, u8 &data, u8 mem_mask)
+		{
+			uint8_t slot = (offset >> 13) & 7;
+			uint8_t active_lut = m_mmu_mem_ctrl & 0x03;
+			uint8_t block = m_mlut[active_lut][slot];
+			if (block == 0xc0)
+			{
+				uint16_t blk_off = offset & 0x1fff;
+				if (blk_off >= 0x1080 && blk_off <= 0x10ff)
+				{
+					uint8_t reg = blk_off & 7;
+					switch (reg)
+					{
+					case 0:
+						data = (m_ld_done ? 0x80 : 0x00) | (m_ld_ctrl & 0x7f);
+						break;
+					case 1:
+						data = m_ld_color;
+						break;
+					case 2:
+						data = (m_ld_fifo_count >> 8) & 0x3f;
+						break;
+					case 3:
+						data = m_ld_fifo_count & 0xff;
+						break;
+					case 4:
+						data = m_ld_x1 & 0xff;
+						break;
+					case 5:
+						data = (m_ld_x1 >> 8) & 0x03;
+						break;
+					case 6:
+						data = m_ld_y1;
+						break;
+					case 7:
+						data = m_ld_y0;
+						break;
+					}
+				}
+			}
+		});
+
+	m_maincpu->space(AS_PROGRAM).install_write_tap(0x0000, 0xffff, "wbjr2_ld_w",
+		[this](offs_t offset, u8 &data, u8 mem_mask)
+		{
+			uint8_t slot = (offset >> 13) & 7;
+			uint8_t active_lut = m_mmu_mem_ctrl & 0x03;
+			uint8_t block = m_mlut[active_lut][slot];
+			if (block == 0xc0)
+			{
+				uint16_t blk_off = offset & 0x1fff;
+				if (blk_off >= 0x1080 && blk_off <= 0x10ff)
+				{
+					uint8_t reg = blk_off & 7;
+					switch (reg)
+					{
+					case 0:
+					{
+						bool old_go = (m_ld_ctrl & 0x02) != 0;
+						bool new_go = (data & 0x02) != 0;
+						m_ld_ctrl = data;
+						if (data & 0x10)
+						{
+							m_ld_done = false;
+							m_ld_fifo_count = 0;
+						}
+						if (!old_go && new_go)
+						{
+							linedraw_execute();
+						}
+						else if (!new_go)
+						{
+							m_ld_done = false;
+						}
+						break;
+					}
+					case 1:
+						m_ld_color = data;
+						break;
+					case 2:
+						m_ld_x0 = (m_ld_x0 & 0x00ff) | ((uint16_t)(data & 0x03) << 8);
+						break;
+					case 3:
+						m_ld_x0 = (m_ld_x0 & 0xff00) | data;
+						break;
+					case 4:
+						m_ld_x1 = (m_ld_x1 & 0x00ff) | ((uint16_t)(data & 0x03) << 8);
+						break;
+					case 5:
+						m_ld_x1 = (m_ld_x1 & 0xff00) | data;
+						break;
+					case 6:
+						m_ld_y0 = data;
+						break;
+					case 7:
+						m_ld_y1 = data;
+						break;
+					}
+				}
+			}
+		});
 
 	m_is_turbo = false;
 	m_io_wait_counter = 0;
@@ -3849,6 +4056,17 @@ void wildbits_jr2_state::machine_reset()
 	// Reset DMA Controller
 	memset(m_dma_reg, 0, sizeof(m_dma_reg));
 	m_dma_status = 0;
+
+	// Reset Hardware Line-Draw Accelerator
+	m_vky_drawline_ctrl = 0;
+	m_ld_ctrl = 0;
+	m_ld_color = 0;
+	m_ld_x0 = 0;
+	m_ld_x1 = 0;
+	m_ld_y0 = 0;
+	m_ld_y1 = 0;
+	m_ld_done = false;
+	m_ld_fifo_count = 0;
 
 	memset(m_vram_c0.get(), 0, 0x2000);
 	memset(m_vram_c1.get(), 0, 0x2000);
