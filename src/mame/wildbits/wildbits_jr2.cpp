@@ -3248,7 +3248,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 			}
 			else if (m_vs_decoding_audio)
 			{
-				if ((m_audio_format == FMT_WAV && !m_wav_header_parsed) || m_vs_sdi_buf.size() >= 1024)
+				if ((m_audio_format == FMT_WAV && !m_wav_header_parsed) || m_vs_sdi_buf.size() >= 512)
 					vs_decode_audio();
 			}
 			else
@@ -3471,37 +3471,35 @@ void wildbits_jr2_state::vs_decode_audio()
 		while (m_pcm_fifo_l.size() < 16384 && m_vs_sdi_buf.size() >= 4)
 		{
 			int samples = mp3dec_decode_frame(&m_mp3dec, m_vs_sdi_buf.data(), m_vs_sdi_buf.size(), pcm, &info);
-			if (info.frame_bytes > 0)
+			if (samples > 0)
 			{
-				if (samples > 0)
+				if (info.hz > 0 && (uint32_t)info.hz != m_current_hz)
 				{
-					if (info.hz > 0 && (uint32_t)info.hz != m_current_hz)
-					{
-						m_current_hz = info.hz;
-						if (m_stream)
-							m_stream->set_sample_rate(m_current_hz);
-					}
-					m_vs_sci[5] = (m_current_hz & 0xfffe) | ((info.channels > 1) ? 1 : 0);
-					m_vs_sci[9] = 0xffe0;
-					m_vs_sci[8] = (info.bitrate_kbps << 8);
+					m_current_hz = info.hz;
+					if (m_stream)
+						m_stream->set_sample_rate(m_current_hz);
+				}
+				m_vs_sci[5] = (m_current_hz & 0xfffe) | ((info.channels > 1) ? 1 : 0);
+				m_vs_sci[9] = 0xffe0;
+				m_vs_sci[8] = (info.bitrate_kbps << 8);
 
-					if (info.channels == 2)
+				if (info.channels == 2)
+				{
+					for (int s = 0; s < samples; s++)
 					{
-						for (int s = 0; s < samples; s++)
-						{
-							m_pcm_fifo_l.push_back(pcm[s * 2]);
-							m_pcm_fifo_r.push_back(pcm[s * 2 + 1]);
-						}
-					}
-					else
-					{
-						for (int s = 0; s < samples; s++)
-						{
-							m_pcm_fifo_l.push_back(pcm[s]);
-							m_pcm_fifo_r.push_back(pcm[s]);
-						}
+						m_pcm_fifo_l.push_back(pcm[s * 2]);
+						m_pcm_fifo_r.push_back(pcm[s * 2 + 1]);
 					}
 				}
+				else
+				{
+					for (int s = 0; s < samples; s++)
+					{
+						m_pcm_fifo_l.push_back(pcm[s]);
+						m_pcm_fifo_r.push_back(pcm[s]);
+					}
+				}
+
 				size_t erase_len = (size_t)info.frame_bytes;
 				if (erase_len > m_vs_sdi_buf.size())
 					erase_len = m_vs_sdi_buf.size();
