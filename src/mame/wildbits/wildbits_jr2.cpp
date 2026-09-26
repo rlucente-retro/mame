@@ -20,6 +20,7 @@
 #include "sound/sn76496.h"
 #include "sound/mos6581.h"
 #include "speaker.h"
+#include "osdepend.h"
 #include <queue>
 #include <cmath>
 #include <cstring>
@@ -421,6 +422,9 @@ private:
 	// Audio CODEC state
 	uint8_t m_codec_lo;
 	uint8_t m_codec_hi;
+	uint8_t m_codec_regs[32];
+	void reset_codec();
+	void update_codec();
 
 	// Hardware Mouse Cursor state
 	uint8_t m_mouse_men;
@@ -430,6 +434,7 @@ private:
 
 	// SAM2695 MIDI state
 	uint8_t m_sam2695_ctrl;
+	std::unique_ptr<osd::midi_output_port> m_midi_out;
 
 	// VS1053b Audio Decoder state ($FF50 - $FF5F)
 	uint8_t m_vs_ctrl;
@@ -830,6 +835,73 @@ void wildbits_jr2_state::rtc_w(offs_t offset, uint8_t data)
 		m_rtc_ctrl = data;
 }
 
+void wildbits_jr2_state::reset_codec()
+{
+	memset(m_codec_regs, 0, sizeof(m_codec_regs));
+	m_codec_regs[0] = 0x79; // HPLOUT (0 dB)
+	m_codec_regs[1] = 0x79; // HPROUT (0 dB)
+	m_codec_regs[2] = 0x79; // HP Master
+	m_codec_regs[3] = 0xff; // DACL (0 dB)
+	m_codec_regs[4] = 0xff; // DACR (0 dB)
+	m_codec_regs[5] = 0xff; // DAC Master
+	m_codec_regs[10] = 0x02; // 16-bit I2S
+	m_codec_regs[13] = 0x00; // All power on
+	m_codec_regs[17] = 0x01; // ALC Control 2
+	m_codec_regs[21] = 0x03; // ADC Mux
+	m_codec_regs[22] = 0x07; // Output Mux
+	update_codec();
+}
+
+void wildbits_jr2_state::update_codec()
+{
+	// WM8776 CODEC Gain Calculation:
+	// R00/R01: Headphone attenuation ($79 = 0 dB, 1 dB/step down to $30 = -73 dB, <$30 = mute)
+	// R03/R04: DAC attenuation ($FF = 0 dB, 0.5 dB/step down to $01 = -127 dB, $00 = mute)
+	// R13: Power-down & mute (bit 0 = chip PD, bit 2 = DAC PD, bit 3 = HP PD)
+
+	auto get_hp_gain = [](uint8_t code) -> float {
+		if (code < 0x30)
+			return 0.0f;
+		float db = (float)((int)code - 121);
+		return std::pow(10.0f, db / 20.0f);
+	};
+
+	auto get_dac_gain = [](uint8_t code) -> float {
+		if (code == 0)
+			return 0.0f;
+		float db = (float)((int)code - 255) * 0.5f;
+		return std::pow(10.0f, db / 20.0f);
+	};
+
+	uint8_t r13 = m_codec_regs[13];
+	bool chip_pd = (r13 & 0x01) != 0;
+	bool dac_pd  = (r13 & 0x04) != 0;
+	bool hp_pd   = (r13 & 0x08) != 0;
+
+	float gain_l = 0.0f;
+	float gain_r = 0.0f;
+
+	if (!chip_pd)
+	{
+		float hp_l = hp_pd ? 0.0f : get_hp_gain(m_codec_regs[0]);
+		float hp_r = hp_pd ? 0.0f : get_hp_gain(m_codec_regs[1]);
+		float dac_l = dac_pd ? 0.0f : get_dac_gain(m_codec_regs[3]);
+		float dac_r = dac_pd ? 0.0f : get_dac_gain(m_codec_regs[4]);
+
+		gain_l = hp_l * dac_l;
+		gain_r = hp_r * dac_r;
+	}
+
+	m_opl3->set_output_gain(0, gain_l);
+	m_opl3->set_output_gain(1, gain_r);
+	m_opl3->set_output_gain(2, gain_l);
+	m_opl3->set_output_gain(3, gain_r);
+	m_psg_l->set_output_gain(ALL_OUTPUTS, gain_l);
+	m_psg_r->set_output_gain(ALL_OUTPUTS, gain_r);
+	m_sid_l->set_output_gain(ALL_OUTPUTS, gain_l);
+	m_sid_r->set_output_gain(ALL_OUTPUTS, gain_r);
+}
+
 // Audio CODEC ($FE70 - $FE72: WM8776)
 uint8_t wildbits_jr2_state::codec_r(offs_t offset)
 {
@@ -842,8 +914,40 @@ uint8_t wildbits_jr2_state::codec_r(offs_t offset)
 void wildbits_jr2_state::codec_w(offs_t offset, uint8_t data)
 {
 	io_wait();
-	if (offset == 0) m_codec_lo = data;
-	else if (offset == 1) m_codec_hi = data;
+	if (offset == 0)
+		m_codec_lo = data;
+	else if (offset == 1)
+		m_codec_hi = data;
+	else if (offset == 2)
+	{
+		if (data & 0x01)
+		{
+			uint16_t word = ((uint16_t)m_codec_hi << 8) | m_codec_lo;
+			uint8_t reg = (word >> 9) & 0x7f;
+			uint8_t val = word & 0xff;
+
+			if (reg == 0x17) // R23: Software reset
+			{
+				reset_codec();
+			}
+			else
+			{
+				if (reg < 32)
+					m_codec_regs[reg] = val;
+				if (reg == 0x02) // Master headphone volume
+				{
+					m_codec_regs[0] = val;
+					m_codec_regs[1] = val;
+				}
+				else if (reg == 0x05) // Master DAC volume
+				{
+					m_codec_regs[3] = val;
+					m_codec_regs[4] = val;
+				}
+				update_codec();
+			}
+		}
+	}
 }
 
 // Hardware Configuration DIP Switches ($FF90)
@@ -2824,7 +2928,9 @@ void wildbits_jr2_state::sam2695_w(offs_t offset, uint8_t data)
 		m_sam2695_ctrl = data;
 		break;
 	case 0x01:
-		// MIDI FIFO data port sink
+		// MIDI FIFO data port sink & host MIDI output
+		if (m_midi_out)
+			m_midi_out->write(data);
 		break;
 	default:
 		break;
@@ -2973,6 +3079,12 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 		else
 		{
 			m_sdi_memtest_idx = (data == s_memtest[0]) ? 1 : 0;
+		}
+
+		if (m_vs_sci[10] == 0x0050) // RT-MIDI mode (VS_AIADDR == 0x0050)
+		{
+			if (m_midi_out)
+				m_midi_out->write(data);
 		}
 		break;
 	}
@@ -3802,6 +3914,21 @@ void wildbits_jr2_state::machine_start()
 	m_timer0 = timer_alloc(FUNC(wildbits_jr2_state::timer0_tick), this);
 	m_timer1 = timer_alloc(FUNC(wildbits_jr2_state::timer1_tick), this);
 
+	// Probe host MIDI output ports and initialize default port if available
+	bool has_midi_out = false;
+	for (const auto &port : machine().osd().list_midi_ports())
+	{
+		if (port.output)
+		{
+			has_midi_out = true;
+			break;
+		}
+	}
+	if (has_midi_out)
+	{
+		m_midi_out = machine().osd().create_midi_output("default");
+	}
+
 	save_pointer(NAME(m_ram), 0x200000);
 	save_pointer(NAME(m_cart), 0x40000);
 	save_pointer(NAME(m_vram_c0), 0x2000);
@@ -3860,6 +3987,9 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_mouse_x));
 	save_item(NAME(m_mouse_y));
 	save_item(NAME(m_mouse_bytes));
+	save_item(NAME(m_codec_lo));
+	save_item(NAME(m_codec_hi));
+	save_item(NAME(m_codec_regs));
 	save_item(NAME(m_sam2695_ctrl));
 	save_item(NAME(m_vs_ctrl));
 	save_item(NAME(m_vs_scireg));
@@ -4199,6 +4329,9 @@ void wildbits_jr2_state::machine_reset()
 	m_mouse_bytes[1] = 0;
 	m_mouse_bytes[2] = 0;
 	m_sam2695_ctrl = 0x0c; // Tx_empty, Rx_empty
+	m_codec_lo = 0;
+	m_codec_hi = 0;
+	reset_codec();
 
 	// Reset VS1053b Audio Decoder
 	m_vs_ctrl = 0;
