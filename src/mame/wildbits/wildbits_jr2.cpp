@@ -22,6 +22,7 @@
 #include "speaker.h"
 #include "osdepend.h"
 #include <queue>
+#include <vector>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -251,6 +252,8 @@ private:
 	// VS1053b Audio Decoder ($FF50 - $FF5F)
 	uint8_t vs1053_r(offs_t offset);
 	void vs1053_w(offs_t offset, uint8_t data);
+	TIMER_CALLBACK_MEMBER(vs_midi_tick);
+	void vs_stop_smf();
 
 	// Real-Time Clock ($FE40 - $FE4F)
 	uint8_t rtc_r(offs_t offset);
@@ -445,6 +448,16 @@ private:
 	uint16_t m_vs_wram_addr;
 	uint16_t m_vs_wram[0x4000];
 	int m_sdi_memtest_idx;
+	std::vector<uint8_t> m_vs_sdi_buf;
+	bool m_vs_playing_smf = false;
+	bool m_vs_smf_waiting_data = false;
+	int m_vs_smf_retry_count = 0;
+	uint32_t m_vs_smf_pos = 0;
+	uint32_t m_vs_smf_division = 480;
+	uint32_t m_vs_smf_tempo_us = 500000;
+	uint8_t m_vs_smf_running_status = 0;
+	emu_timer *m_vs_midi_timer = nullptr;
+	double m_vs_decode_seconds = 0.0;
 
 	// SPI SD Card state
 	uint8_t m_sdc_stat;
@@ -2956,11 +2969,41 @@ uint8_t wildbits_jr2_state::vs1053_r(offs_t offset)
 		// $FF53: VS_DATALO
 		return m_vs_data_lo;
 	case 4:
+	{
 		// $FF54: VS_FIFOSTAT (bit 7 = Empty, bit 6 = Full, bits 2..0 = count 10..8)
-		return 0x80;
+		uint16_t count = 0;
+		if (m_vs_playing_smf)
+		{
+			uint32_t buffered = (m_vs_sdi_buf.size() > m_vs_smf_pos) ? (m_vs_sdi_buf.size() - m_vs_smf_pos) : 0;
+			if (buffered == 0)
+				count = 0;
+			else if (buffered >= 2048)
+				count = 2040 - (m_vs_smf_pos % 128);
+			else
+				count = (uint16_t)buffered;
+		}
+		uint8_t stat = 0;
+		if (count == 0) stat |= 0x80; // Empty
+		if (count >= 2048) stat |= 0x40; // Full
+		stat |= ((count >> 8) & 0x07);
+		return stat;
+	}
 	case 5:
+	{
 		// $FF55: VS_FIFOCNTL (count 7..0)
-		return 0x00;
+		uint16_t count = 0;
+		if (m_vs_playing_smf)
+		{
+			uint32_t buffered = (m_vs_sdi_buf.size() > m_vs_smf_pos) ? (m_vs_sdi_buf.size() - m_vs_smf_pos) : 0;
+			if (buffered == 0)
+				count = 0;
+			else if (buffered >= 2048)
+				count = 2040 - (m_vs_smf_pos % 128);
+			else
+				count = (uint16_t)buffered;
+		}
+		return count & 0xff;
+	}
 	case 6:
 		return 0x00;
 	case 7:
@@ -2982,6 +3025,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 		m_vs_ctrl = data & 0x0f;
 		if (m_vs_ctrl & 0x08) // VS_RESET: hold chip XRESET low, restore boot defaults
 		{
+			vs_stop_smf();
 			memset(m_vs_sci, 0, sizeof(m_vs_sci));
 			m_vs_sci[0] = 0x0800; // MODE: SM_SDINEW
 			m_vs_sci[1] = 0x0048; // STATUS: VS1053b (version 4) + SS_APDOWN2 (analog powerdown)
@@ -3031,6 +3075,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 					{
 						if (val & 0x04) // SM_RESET
 						{
+							vs_stop_smf();
 							m_vs_sci[0] = 0x0800;
 							m_vs_sci[1] = 0x0048;
 							m_vs_sci[5] = 0x1f40;
@@ -3040,6 +3085,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 						}
 						if (val & 0x08) // SM_CANCEL
 						{
+							vs_stop_smf();
 							m_vs_sci[0] &= ~0x08; // clear cancel flag when done
 						}
 					}
@@ -3086,10 +3132,315 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 			if (m_midi_out)
 				m_midi_out->write(data);
 		}
+		else
+		{
+			// Standard MIDI File stream decoding
+			m_vs_sdi_buf.push_back(data);
+
+			if (!m_vs_playing_smf)
+			{
+				if (m_vs_sdi_buf.size() >= 22 &&
+				    m_vs_sdi_buf[0] == 'M' && m_vs_sdi_buf[1] == 'T' &&
+				    m_vs_sdi_buf[2] == 'h' && m_vs_sdi_buf[3] == 'd' &&
+				    m_vs_sdi_buf[14] == 'M' && m_vs_sdi_buf[15] == 'T' &&
+				    m_vs_sdi_buf[16] == 'r' && m_vs_sdi_buf[17] == 'k')
+				{
+					m_vs_smf_division = ((uint32_t)m_vs_sdi_buf[12] << 8) | m_vs_sdi_buf[13];
+					if (m_vs_smf_division == 0)
+						m_vs_smf_division = 480;
+					m_vs_smf_tempo_us = 500000;
+					m_vs_smf_pos = 22; // Start of track events
+					m_vs_smf_running_status = 0;
+					m_vs_playing_smf = true;
+					m_vs_smf_waiting_data = false;
+					m_vs_smf_retry_count = 0;
+					m_vs_sci[9] = 0xffe0; // HDAT1 active
+					m_vs_sci[4] = 0;      // DECODE_TIME = 0
+					m_vs_decode_seconds = 0.0;
+
+					// Read initial delta-time
+					uint32_t save_pos = m_vs_smf_pos;
+					uint32_t delta = 0;
+					bool ok = false;
+					while (m_vs_smf_pos < m_vs_sdi_buf.size())
+					{
+						uint8_t b = m_vs_sdi_buf[m_vs_smf_pos++];
+						delta = (delta << 7) | (b & 0x7f);
+						if (!(b & 0x80))
+						{
+							ok = true;
+							break;
+						}
+					}
+					if (!ok)
+					{
+						m_vs_smf_pos = save_pos;
+						m_vs_smf_waiting_data = true;
+						if (m_vs_midi_timer)
+							m_vs_midi_timer->adjust(attotime::from_msec(2));
+					}
+					else
+					{
+						double dt = (double)delta * ((double)m_vs_smf_tempo_us / 1000000.0) / (double)m_vs_smf_division;
+						m_vs_decode_seconds += dt;
+						m_vs_sci[4] = (uint16_t)m_vs_decode_seconds;
+						if (m_vs_midi_timer)
+							m_vs_midi_timer->adjust(attotime::from_double(dt));
+					}
+				}
+				else if (m_vs_sdi_buf.size() > 32 &&
+				         (m_vs_sdi_buf[0] != 'M' || m_vs_sdi_buf[1] != 'T' ||
+				          m_vs_sdi_buf[2] != 'h' || m_vs_sdi_buf[3] != 'd'))
+				{
+					m_vs_sdi_buf.erase(m_vs_sdi_buf.begin());
+				}
+			}
+			else if (m_vs_playing_smf && m_vs_smf_waiting_data)
+			{
+				if (m_vs_smf_pos == 22)
+				{
+					uint32_t save_pos = m_vs_smf_pos;
+					uint32_t delta = 0;
+					bool ok = false;
+					while (m_vs_smf_pos < m_vs_sdi_buf.size())
+					{
+						uint8_t b = m_vs_sdi_buf[m_vs_smf_pos++];
+						delta = (delta << 7) | (b & 0x7f);
+						if (!(b & 0x80))
+						{
+							ok = true;
+							break;
+						}
+					}
+					if (ok)
+					{
+						m_vs_smf_waiting_data = false;
+						m_vs_smf_retry_count = 0;
+						double dt = (double)delta * ((double)m_vs_smf_tempo_us / 1000000.0) / (double)m_vs_smf_division;
+						m_vs_decode_seconds += dt;
+						m_vs_sci[4] = (uint16_t)m_vs_decode_seconds;
+						if (m_vs_midi_timer)
+							m_vs_midi_timer->adjust(attotime::from_double(dt));
+					}
+					else
+					{
+						m_vs_smf_pos = save_pos;
+					}
+				}
+				else
+				{
+					m_vs_smf_waiting_data = false;
+					m_vs_smf_retry_count = 0;
+					if (m_vs_midi_timer)
+						m_vs_midi_timer->adjust(attotime::zero);
+				}
+			}
+		}
 		break;
 	}
 	default:
 		break;
+	}
+}
+
+void wildbits_jr2_state::vs_stop_smf()
+{
+	if (m_vs_midi_timer)
+		m_vs_midi_timer->adjust(attotime::never);
+	m_vs_playing_smf = false;
+	m_vs_smf_waiting_data = false;
+	m_vs_smf_retry_count = 0;
+	m_vs_smf_pos = 0;
+	m_vs_sdi_buf.clear();
+	m_vs_sci[9] = 0x0000; // HDAT1 = 0 (clean end)
+
+	if (m_midi_out)
+	{
+		for (uint8_t ch = 0; ch < 16; ch++)
+		{
+			m_midi_out->write(0xb0 | ch);
+			m_midi_out->write(0x7b); // All Notes Off
+			m_midi_out->write(0x00);
+		}
+	}
+}
+
+TIMER_CALLBACK_MEMBER(wildbits_jr2_state::vs_midi_tick)
+{
+	if (!m_vs_playing_smf)
+		return;
+
+	while (m_vs_playing_smf)
+	{
+		uint32_t cur = m_vs_smf_pos;
+		uint8_t cur_rs = m_vs_smf_running_status;
+
+		auto read_vlq = [this](uint32_t &pos, bool &ok) -> uint32_t {
+			uint32_t val = 0;
+			ok = false;
+			while (pos < m_vs_sdi_buf.size())
+			{
+				uint8_t b = m_vs_sdi_buf[pos++];
+				val = (val << 7) | (b & 0x7f);
+				if (!(b & 0x80))
+				{
+					ok = true;
+					break;
+				}
+			}
+			return val;
+		};
+
+		bool need_more = false;
+		if (m_vs_smf_pos >= m_vs_sdi_buf.size())
+		{
+			need_more = true;
+		}
+		else
+		{
+			uint8_t b = m_vs_sdi_buf[m_vs_smf_pos++];
+			if (b == 0xff) // Meta event
+			{
+				if (m_vs_smf_pos >= m_vs_sdi_buf.size())
+				{
+					need_more = true;
+				}
+				else
+				{
+					uint8_t type = m_vs_sdi_buf[m_vs_smf_pos++];
+					bool ok_len = false;
+					uint32_t len = read_vlq(m_vs_smf_pos, ok_len);
+					if (!ok_len || m_vs_smf_pos + len > m_vs_sdi_buf.size())
+					{
+						need_more = true;
+					}
+					else
+					{
+						m_vs_smf_running_status = 0;
+						if (type == 0x51 && len == 3)
+						{
+							m_vs_smf_tempo_us = ((uint32_t)m_vs_sdi_buf[m_vs_smf_pos] << 16) |
+							                    ((uint32_t)m_vs_sdi_buf[m_vs_smf_pos + 1] << 8) |
+							                    (uint32_t)m_vs_sdi_buf[m_vs_smf_pos + 2];
+						}
+						else if (type == 0x2f) // End of Track
+						{
+							vs_stop_smf();
+							return;
+						}
+						m_vs_smf_pos += len;
+					}
+				}
+			}
+			else if (b == 0xf0 || b == 0xf7) // SysEx
+			{
+				bool ok_len = false;
+				uint32_t len = read_vlq(m_vs_smf_pos, ok_len);
+				if (!ok_len || m_vs_smf_pos + len > m_vs_sdi_buf.size())
+				{
+					need_more = true;
+				}
+				else
+				{
+					m_vs_smf_running_status = 0;
+					m_vs_smf_pos += len;
+				}
+			}
+			else // Channel event
+			{
+				uint8_t status = 0;
+				uint8_t d1 = 0;
+				if (b & 0x80)
+				{
+					status = b;
+					if (status < 0xf0)
+						m_vs_smf_running_status = status;
+					else
+						m_vs_smf_running_status = 0;
+
+					if (m_vs_smf_pos >= m_vs_sdi_buf.size())
+					{
+						need_more = true;
+					}
+					else
+					{
+						d1 = m_vs_sdi_buf[m_vs_smf_pos++];
+					}
+				}
+				else
+				{
+					status = m_vs_smf_running_status;
+					d1 = b;
+				}
+
+				if (!need_more)
+				{
+					uint8_t type = status & 0xf0;
+					bool has_d2 = (type != 0xc0 && type != 0xd0);
+					uint8_t d2 = 0;
+					if (has_d2)
+					{
+						if (m_vs_smf_pos >= m_vs_sdi_buf.size())
+						{
+							need_more = true;
+						}
+						else
+						{
+							d2 = m_vs_sdi_buf[m_vs_smf_pos++];
+						}
+					}
+
+					if (!need_more && m_midi_out && (status & 0x80))
+					{
+						m_midi_out->write(status);
+						m_midi_out->write(d1);
+						if (has_d2)
+							m_midi_out->write(d2);
+					}
+				}
+			}
+		}
+
+		if (!need_more)
+		{
+			// Read the next delta-time
+			bool ok_dt = false;
+			uint32_t delta = read_vlq(m_vs_smf_pos, ok_dt);
+			if (!ok_dt)
+			{
+				need_more = true;
+			}
+			else
+			{
+				double dt = (double)delta * ((double)m_vs_smf_tempo_us / 1000000.0) / (double)m_vs_smf_division;
+				m_vs_decode_seconds += dt;
+				m_vs_sci[4] = (uint16_t)m_vs_decode_seconds;
+
+				if (delta > 0)
+				{
+					if (m_vs_midi_timer)
+						m_vs_midi_timer->adjust(attotime::from_double(dt));
+					return;
+				}
+				// delta == 0: continue while loop to process next event immediately!
+			}
+		}
+
+		if (need_more)
+		{
+			m_vs_smf_pos = cur;
+			m_vs_smf_running_status = cur_rs;
+			m_vs_smf_waiting_data = true;
+			m_vs_smf_retry_count++;
+			if (m_vs_smf_retry_count > 500) // 1 second without data: stop
+			{
+				vs_stop_smf();
+				return;
+			}
+			if (m_vs_midi_timer)
+				m_vs_midi_timer->adjust(attotime::from_msec(2));
+			return;
+		}
 	}
 }
 
@@ -3913,6 +4264,7 @@ void wildbits_jr2_state::machine_start()
 
 	m_timer0 = timer_alloc(FUNC(wildbits_jr2_state::timer0_tick), this);
 	m_timer1 = timer_alloc(FUNC(wildbits_jr2_state::timer1_tick), this);
+	m_vs_midi_timer = timer_alloc(FUNC(wildbits_jr2_state::vs_midi_tick), this);
 
 	// Probe host MIDI output ports and initialize default port if available
 	bool has_midi_out = false;
@@ -4334,6 +4686,7 @@ void wildbits_jr2_state::machine_reset()
 	reset_codec();
 
 	// Reset VS1053b Audio Decoder
+	vs_stop_smf();
 	m_vs_ctrl = 0;
 	m_vs_scireg = 0;
 	m_vs_data_hi = 0;
@@ -4380,6 +4733,7 @@ void wildbits_jr2_state::machine_reset()
 
 void wildbits_jr2_state::device_stop()
 {
+	vs_stop_smf();
 	printf("\n=== VRAM TEXT MATRIX SNAPSHOT ===\n");
 	for (int r = 0; r < 30; r++)
 	{
