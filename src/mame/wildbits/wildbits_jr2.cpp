@@ -3220,40 +3220,18 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 		uint8_t default_clut = (tm_ctrl >> 1) & 0x03;
 
 		// 24-bit physical RAM pointer to tilemap matrix
-		// Per defs/wildbits.d: +1: TLk_START_ADDY_L, +2: TLk_START_ADDY_M, +3: TLk_START_ADDY_H
+		// Per defs/wildbits.d: +1: TLk_START_ADDY_H, +2: TLk_START_ADDY_M, +3: TLk_START_ADDY_L
 		uint8_t b1 = m_vram_c0[tm_base + 1];
 		uint8_t b2 = m_vram_c0[tm_base + 2];
 		uint8_t b3 = m_vram_c0[tm_base + 3];
-		uint32_t start_addr;
-		if (b1 <= 0x07 && b3 > 0x07)
-			start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3; // Big-endian
-		else if (b3 <= 0x07 && b1 > 0x07)
-			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Little-endian
-		else if (b1 != 0 && b3 == 0)
-			start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3; // Big-endian (H in b1, L is 0)
-		else if (b1 == 0 && b3 != 0)
-			start_addr = ((uint32_t)b3 << 16) | ((uint32_t)b2 << 8) | b1; // Little-endian (H in b3, L is 0)
-		else
-			start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3; // Default Big-endian on 6809
+		uint32_t start_addr = ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | b3;
 
 		// Virtual map size in tiles (Big-Endian on FNX6809: +4: SIZE_H, +5: SIZE_L)
-		uint16_t map_w;
-		if (m_vram_c0[tm_base + 4] == 0 && m_vram_c0[tm_base + 5] != 0)
-			map_w = m_vram_c0[tm_base + 5]; // Big-endian: High=0, Low in +5
-		else if (m_vram_c0[tm_base + 5] == 0 && m_vram_c0[tm_base + 4] != 0)
-			map_w = m_vram_c0[tm_base + 4]; // Little-endian fallback: High=0, Low in +4
-		else
-			map_w = ((uint16_t)m_vram_c0[tm_base + 4] << 8) | m_vram_c0[tm_base + 5];
+		uint16_t map_w = ((uint16_t)m_vram_c0[tm_base + 4] << 8) | m_vram_c0[tm_base + 5];
 		if (map_w == 0)
 			map_w = (bm_w / tile_size);
 
-		uint16_t map_h;
-		if (m_vram_c0[tm_base + 6] == 0 && m_vram_c0[tm_base + 7] != 0)
-			map_h = m_vram_c0[tm_base + 7]; // Big-endian: High=0, Low in +7
-		else if (m_vram_c0[tm_base + 7] == 0 && m_vram_c0[tm_base + 6] != 0)
-			map_h = m_vram_c0[tm_base + 6]; // Little-endian fallback: High=0, Low in +6
-		else
-			map_h = ((uint16_t)m_vram_c0[tm_base + 6] << 8) | m_vram_c0[tm_base + 7];
+		uint16_t map_h = ((uint16_t)m_vram_c0[tm_base + 6] << 8) | m_vram_c0[tm_base + 7];
 		if (map_h == 0)
 			map_h = (bm_h / tile_size);
 
@@ -3262,21 +3240,8 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 
 		// Scroll offsets in pixels (FNX6809 hardware register pairs are Big-Endian:
 		// +8: POS_H, +9: POS_L, +10: POS_H, +11: POS_L)
-		uint16_t scroll_x;
-		if (m_vram_c0[tm_base + 8] == 0 && m_vram_c0[tm_base + 9] != 0)
-			scroll_x = m_vram_c0[tm_base + 9]; // Big-endian: High=0, Low in +9
-		else if (m_vram_c0[tm_base + 9] == 0 && m_vram_c0[tm_base + 8] != 0)
-			scroll_x = m_vram_c0[tm_base + 8]; // Little-endian fallback: High=0, Low in +8
-		else
-			scroll_x = ((uint16_t)m_vram_c0[tm_base + 8] << 8) | m_vram_c0[tm_base + 9]; // Big-endian default
-
-		uint16_t scroll_y;
-		if (m_vram_c0[tm_base + 10] == 0 && m_vram_c0[tm_base + 11] != 0)
-			scroll_y = m_vram_c0[tm_base + 11]; // Big-endian: High=0, Low in +11
-		else if (m_vram_c0[tm_base + 11] == 0 && m_vram_c0[tm_base + 10] != 0)
-			scroll_y = m_vram_c0[tm_base + 10]; // Little-endian fallback: High=0, Low in +10
-		else
-			scroll_y = ((uint16_t)m_vram_c0[tm_base + 10] << 8) | m_vram_c0[tm_base + 11]; // Big-endian default
+		uint16_t scroll_x = ((uint16_t)m_vram_c0[tm_base + 8] << 8) | m_vram_c0[tm_base + 9];
+		uint16_t scroll_y = ((uint16_t)m_vram_c0[tm_base + 10] << 8) | m_vram_c0[tm_base + 11];
 
 		int total_w_pix = (int)map_w * tile_size;
 		int total_h_pix = (int)map_h * tile_size;
@@ -3305,17 +3270,15 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				int fine_x_orig = virt_x % tile_size;
 
 				uint32_t cell_addr = start_addr + ((uint32_t)tile_y * map_w + tile_x) * 2;
-				if (cell_addr + 1 >= 0x080000)
+				if (cell_addr + 1 >= 0x200000)
 					continue;
 
 				uint8_t tile_idx = m_ram[cell_addr + 0];
 				uint8_t tile_attr = m_ram[cell_addr + 1];
 
-				// On TinyVicky II FPGA hardware, tile index 0 in the matrix is transparent (no tile).
-				// Positive tile indices 1..255 are 1-based references to tiles in the active Tile Set (0..254).
+				// In TinyVicky II, tile index 0 in the cell matrix denotes an empty/transparent cell
 				if (tile_idx == 0)
 					continue;
-				uint8_t eff_tile_idx = tile_idx - 1;
 
 				bool hflip = (tile_attr & 0x80) != 0;
 				bool vflip = (tile_attr & 0x40) != 0;
@@ -3325,37 +3288,40 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				uint8_t ts = (tile_attr >> 1) & 0x07;
 				uint16_t ts_reg = 0x1180 + ts * 4;
 
-				uint8_t tb0 = m_vram_c0[ts_reg + 0];
-				uint8_t tb1 = m_vram_c0[ts_reg + 1];
-				uint8_t tb2 = m_vram_c0[ts_reg + 2];
+				// FNX6809 / Wildbits Jr2 Tileset registers (Page $C0 offsets $1180..$119F, per defs/wildbits.d):
+				// +0: TILE_MAP_ADDY_CFG (bit 3: 1 = square 256-pixel bitmap stride, 0 = 1D linear)
+				// +1: TILE_MAP_ADDY_H (Physical RAM address 23:16)
+				// +2: TILE_MAP_ADDY_M (Physical RAM address 15:8)
+				// +3: TILE_MAP_ADDY_L (Physical RAM address 7:0)
+				bool square;
 				uint32_t ts_addr;
-				if (tb0 <= 0x07 && tb2 > 0x07)
-					ts_addr = ((uint32_t)tb0 << 16) | ((uint32_t)tb1 << 8) | tb2; // Big-endian
-				else if (tb2 <= 0x07 && tb0 > 0x07)
-					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Little-endian
-				else if (tb0 != 0 && tb2 == 0)
-					ts_addr = ((uint32_t)tb0 << 16) | ((uint32_t)tb1 << 8) | tb2; // Big-endian (H in tb0, L is 0)
-				else if (tb0 == 0 && tb2 != 0)
-					ts_addr = ((uint32_t)tb2 << 16) | ((uint32_t)tb1 << 8) | tb0; // Little-endian (H in tb2, L is 0)
+				if (m_vram_c0[ts_reg + 0] <= 0x0f && m_vram_c0[ts_reg + 1] <= 0x1f)
+				{
+					// Standard Wildbits Jr2 layout
+					square = (m_vram_c0[ts_reg + 0] & 0x08) != 0;
+					ts_addr = ((uint32_t)m_vram_c0[ts_reg + 1] << 16) | ((uint32_t)m_vram_c0[ts_reg + 2] << 8) | m_vram_c0[ts_reg + 3];
+				}
 				else
-					ts_addr = ((uint32_t)tb0 << 16) | ((uint32_t)tb1 << 8) | tb2; // Default Big-endian on 6809
-
-				bool square = (m_vram_c0[ts_reg + 3] & 0x08) != 0;
+				{
+					// Legacy C256 / F256 fallback (+0..+2 L, M, H, +3 CFG)
+					square = (m_vram_c0[ts_reg + 3] & 0x08) != 0;
+					ts_addr = ((uint32_t)m_vram_c0[ts_reg + 2] << 16) | ((uint32_t)m_vram_c0[ts_reg + 1] << 8) | m_vram_c0[ts_reg + 0];
+				}
 
 				uint32_t pix_addr;
 				if (square)
 				{
-					int tile_col = eff_tile_idx % 16;
-					int tile_row = eff_tile_idx / 16;
+					int tile_col = tile_idx % 16;
+					int tile_row = tile_idx / 16;
 					int pitch = 16 * tile_size; // 128 for 8x8, 256 for 16x16
 					pix_addr = ts_addr + (uint32_t)(tile_row * tile_size + fine_y) * pitch + (tile_col * tile_size + fine_x);
 				}
 				else
 				{
-					pix_addr = ts_addr + ((uint32_t)eff_tile_idx * tile_size + fine_y) * tile_size + fine_x;
+					pix_addr = ts_addr + ((uint32_t)tile_idx * tile_size + fine_y) * tile_size + fine_x;
 				}
 
-				if (pix_addr >= 0x080000)
+				if (pix_addr >= 0x200000)
 					continue;
 
 				uint8_t color_idx = m_ram[pix_addr];
@@ -3416,91 +3382,57 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 		}
 	};
 
-	// Render background sprites (depth 3 = total back)
+	// Helper to check if a bitmap/tilemap plane is active/enabled
+	auto has_plane = [&](int p) -> bool {
+		if (p <= 2)
+			return bitmap_en && ((m_vram_c0[0x1000 + p * 8] & 0x01) != 0);
+		else if (p >= 4 && p <= 6)
+			return tile_en && ((m_vram_c0[0x1100 + (p - 4) * 12] & 0x01) != 0);
+		return false;
+	};
+
+	// Render background sprites (depth 3 = behind Layer 2 / total back)
 	render_sprites(3);
 
 	// Render TinyVicky Graphics Layers (Bitmaps, Tilemaps & Sprites)
 	if (graph_en && (bitmap_en || tile_en))
 	{
-		// Determine layer composite order (Layer 0 = back, Layer 1 = middle, Layer 2 = front)
-		int layer_planes[3];
-		layer_planes[0] = m_vky_layer_ctrl_0 & 0x0f;
-		layer_planes[1] = (m_vky_layer_ctrl_0 >> 4) & 0x0f;
-		layer_planes[2] = m_vky_layer_ctrl_1 & 0x0f;
+		// Hardware layer compositing order per TinyVicky architecture:
+		// Layer 2 = background, Layer 1 = middle, Layer 0 = foreground
+		int l0_plane = m_vky_layer_ctrl_0 & 0x0f;        // Layer 0 (front)
+		int l1_plane = (m_vky_layer_ctrl_0 >> 4) & 0x0f; // Layer 1 (middle)
+		int l2_plane = m_vky_layer_ctrl_1 & 0x0f;        // Layer 2 (back)
 
-		std::vector<int> planes_to_render;
-		if (m_vky_layer_ctrl_0 != 0 || m_vky_layer_ctrl_1 != 0)
-		{
-			for (int i = 0; i < 3; i++)
+		bool rendered[7] = { false };
+		auto try_render_layer = [&](int p) {
+			if (p >= 0 && p < 7 && !rendered[p] && has_plane(p))
 			{
-				int p = layer_planes[i];
-				if (((p <= 2 && bitmap_en) || (p >= 4 && p <= 6 && tile_en)) &&
-				    std::find(planes_to_render.begin(), planes_to_render.end(), p) == planes_to_render.end())
-				{
-					planes_to_render.push_back(p);
-				}
+				render_layer_plane(p);
+				rendered[p] = true;
 			}
-			if (bitmap_en)
-			{
-				for (int p = 0; p < 3; p++)
-				{
-					uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
-					if ((ctrl & 0x01) && std::find(planes_to_render.begin(), planes_to_render.end(), p) == planes_to_render.end())
-					{
-						planes_to_render.push_back(p);
-					}
-				}
-			}
-			if (tile_en)
-			{
-				for (int t = 0; t < 3; t++)
-				{
-					uint8_t ctrl = m_vram_c0[0x1100 + t * 12];
-					if ((ctrl & 0x01) && std::find(planes_to_render.begin(), planes_to_render.end(), 4 + t) == planes_to_render.end())
-					{
-						planes_to_render.push_back(4 + t);
-					}
-				}
-			}
-		}
-		else
-		{
-			if (bitmap_en)
-			{
-				for (int p = 0; p < 3; p++)
-				{
-					uint8_t ctrl = m_vram_c0[0x1000 + p * 8];
-					if (ctrl & 0x01)
-						planes_to_render.push_back(p);
-				}
-			}
-			if (tile_en)
-			{
-				for (int t = 0; t < 3; t++)
-				{
-					uint8_t ctrl = m_vram_c0[0x1100 + t * 12];
-					if (ctrl & 0x01)
-						planes_to_render.push_back(4 + t);
-				}
-			}
-		}
+		};
 
-		if (planes_to_render.size() > 0)
-			render_layer_plane(planes_to_render[0]);
-		render_sprites(1); // Between Layer 0 and 1
+		// 1. Layer 2 (Background, e.g. clouds)
+		try_render_layer(l2_plane);
+		render_sprites(2); // Between Layer 2 and Layer 1
 
-		if (planes_to_render.size() > 1)
-			render_layer_plane(planes_to_render[1]);
-		render_sprites(2); // Between Layer 1 and 2
+		// 2. Layer 1 (Middle, e.g. mountains)
+		try_render_layer(l1_plane);
+		render_sprites(1); // Between Layer 1 and Layer 0
 
-		if (planes_to_render.size() > 2)
-			render_layer_plane(planes_to_render[2]);
-		render_sprites(0); // Total front
+		// 3. Layer 0 (Foreground, e.g. platforms / primary playfield)
+		try_render_layer(l0_plane);
+
+		// Render any unassigned but enabled planes (fallback for unconfigured layers)
+		for (int p = 0; p < 7; p++)
+			try_render_layer(p);
+
+		render_sprites(0); // In front of Layer 0 (total front)
 	}
 	else
 	{
-		render_sprites(1);
 		render_sprites(2);
+		render_sprites(1);
 		render_sprites(0);
 	}
 
@@ -3899,6 +3831,7 @@ void wildbits_jr2_state::machine_start()
 
 	m_is_turbo = false;
 	m_io_wait_counter = 0;
+
 
 	m_scanline_timer = timer_alloc(FUNC(wildbits_jr2_state::scanline_tick), this);
 }
