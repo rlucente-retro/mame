@@ -16,6 +16,10 @@
 #include "cpu/m6809/m6809.h"
 #include "machine/spi_sdcard.h"
 #include "screen.h"
+#include "sound/ymopl.h"
+#include "sound/sn76496.h"
+#include "sound/mos6581.h"
+#include "speaker.h"
 #include <queue>
 #include <cmath>
 #include <cstring>
@@ -171,6 +175,11 @@ public:
 	wildbits_jr2_state(const machine_config &mconfig, device_type type, const char *tag)
 		: driver_device(mconfig, type, tag)
 		, m_maincpu(*this, "maincpu")
+		, m_opl3(*this, "opl3")
+		, m_psg_l(*this, "psg_l")
+		, m_psg_r(*this, "psg_r")
+		, m_sid_l(*this, "sid_l")
+		, m_sid_r(*this, "sid_r")
 		, m_sdcard(*this, "sdcard")
 		, m_screen(*this, "screen")
 		, m_flash(*this, "flash")
@@ -217,6 +226,18 @@ private:
 	void rst1_w(uint8_t data);
 	uint8_t mid_r();
 	uint8_t pcbid_r(offs_t offset);
+
+	// LFSR Random Number Generator ($FE04 - $FE06)
+	void lfsr_update();
+	uint8_t lfsr_r(offs_t offset);
+	void lfsr_w(offs_t offset, uint8_t data);
+
+	// Optical Keyboard Decode ($FE10 - $FE1F)
+	uint8_t optkbd_r(offs_t offset);
+
+	// Consolidated Fixed I/O Sound Registers ($FF91 - $FF99)
+	uint8_t sound_fixed_r(offs_t offset);
+	void sound_fixed_w(offs_t offset, uint8_t data);
 
 	// Hardware Mouse Cursor ($FEA0 - $FEA8)
 	uint8_t mouse_r(offs_t offset);
@@ -313,6 +334,11 @@ private:
 	uint8_t *get_physical_block_ptr(uint8_t block_num);
 
 	required_device<cpu_device> m_maincpu;
+	required_device<ymf262_device> m_opl3;
+	required_device<sn76489_device> m_psg_l;
+	required_device<sn76489_device> m_psg_r;
+	required_device<mos6581_device> m_sid_l;
+	required_device<mos6581_device> m_sid_r;
 	required_device<spi_sdcard_device> m_sdcard;
 	required_device<screen_device> m_screen;
 	required_region_ptr<uint8_t> m_flash;
@@ -341,6 +367,15 @@ private:
 	uint8_t m_sys1;
 	uint8_t m_rst0;
 	uint8_t m_rst1;
+
+	// LFSR state ($FE04 - $FE06)
+	uint16_t m_lfsr;
+	uint16_t m_lfsr_seed;
+	uint8_t m_lfsr_ctrl;
+	uint64_t m_lfsr_last_cycle;
+
+	// Sound state ($FF91 - $FF99)
+	uint8_t m_sid_select;
 
 	// Interrupt Controller
 	uint8_t m_int_pending[4];
@@ -695,6 +730,71 @@ uint8_t wildbits_jr2_state::mid_r()
 {
 	io_wait();
 	return WBJR2_MACHINE_ID;
+}
+
+// LFSR Random Number Generator ($FE04 - $FE06)
+void wildbits_jr2_state::lfsr_update()
+{
+	if (!(m_lfsr_ctrl & 0x01))
+	{
+		m_lfsr_last_cycle = m_maincpu->total_cycles();
+		return;
+	}
+
+	uint64_t current_cycles = m_maincpu->total_cycles();
+	uint64_t elapsed = current_cycles - m_lfsr_last_cycle;
+	m_lfsr_last_cycle = current_cycles;
+
+	if (m_lfsr_ctrl & 0x02)
+	{
+		// Seed Data Valid is active: held at seed value
+		m_lfsr = m_lfsr_seed;
+		return;
+	}
+
+	elapsed %= 65535;
+	while (elapsed--)
+	{
+		uint8_t xnor = !(((m_lfsr >> 15) ^ (m_lfsr >> 14) ^ (m_lfsr >> 12) ^ (m_lfsr >> 3)) & 1);
+		m_lfsr = ((m_lfsr << 1) & 0xfffe) | xnor;
+	}
+}
+
+uint8_t wildbits_jr2_state::lfsr_r(offs_t offset)
+{
+	io_wait();
+	lfsr_update();
+	switch (offset)
+	{
+	case 0: // $FE04: LFSR Data Low
+		return m_lfsr & 0xff;
+	case 1: // $FE05: LFSR Data High
+		return (m_lfsr >> 8) & 0xff;
+	case 2: // $FE06: LFSR Status / Control
+		return ((m_lfsr == m_lfsr_seed) ? 0x80 : 0x00) | (m_lfsr_ctrl & 0x7f);
+	default:
+		return 0x00;
+	}
+}
+
+void wildbits_jr2_state::lfsr_w(offs_t offset, uint8_t data)
+{
+	io_wait();
+	lfsr_update();
+	switch (offset)
+	{
+	case 0: // $FE04: Seed Low
+		m_lfsr_seed = (m_lfsr_seed & 0xff00) | data;
+		break;
+	case 1: // $FE05: Seed High
+		m_lfsr_seed = (m_lfsr_seed & 0x00ff) | ((uint16_t)data << 8);
+		break;
+	case 2: // $FE06: Control Register
+		m_lfsr_ctrl = data;
+		if (data & 0x02)
+			m_lfsr = m_lfsr_seed;
+		break;
+	}
 }
 
 // Real-Time Clock ($FE40 - $FE4F: bq4802)
@@ -2584,12 +2684,76 @@ uint8_t wildbits_jr2_state::pcbid_r(offs_t offset)
 {
 	io_wait();
 	static const uint8_t s_id_ver[8] = {
-		'B', '0',       // $FE08-$FE09: PCBID ("B0")
-		0x00, 0x00,     // $FE0A-$FE0B: Sub / Minor version
-		0x08, 0x00,     // $FE0C-$FE0D: Major version (v8) / Chip ID low
-		0x02, 0x00      // $FE0E-$FE0F: Chip ID high (TinyVicky II)
+		'A', '0',       // $FE08-$FE09: PCBID ("A0")
+		0x11, 0x00,     // $FE0A-$FE0B: CHIP_SUBVERSION ($0011 = 17)
+		0x00, 0x02,     // $FE0C-$FE0D: CHIP_VERSION ($0200)
+		0x09, 0x95      // $FE0E-$FE0F: CHIP_NUMBER ($9509)
 	};
 	return s_id_ver[offset & 7];
+}
+
+// Optical Keyboard Decode ($FE10 - $FE1F)
+uint8_t wildbits_jr2_state::optkbd_r(offs_t offset)
+{
+	io_wait();
+	return 0x55;
+}
+
+// Consolidated Fixed I/O Sound Registers ($FF91 - $FF99)
+uint8_t wildbits_jr2_state::sound_fixed_r(offs_t offset)
+{
+	io_wait();
+	if (offset == 7) // $FF98: SID selector
+		return m_sid_select & 0x7f;
+	return 0xff;
+}
+
+void wildbits_jr2_state::sound_fixed_w(offs_t offset, uint8_t data)
+{
+	io_wait();
+	switch (offset)
+	{
+	case 0: // $FF91: Left PSG
+		m_psg_l->write(data);
+		break;
+	case 1: // $FF92: Both / Mono PSG
+		m_psg_l->write(data);
+		m_psg_r->write(data);
+		break;
+	case 2: // $FF93: Right PSG
+		m_psg_r->write(data);
+		break;
+	case 3: // $FF94: OPL3 Bank 0 Address
+		m_opl3->write(0, data);
+		break;
+	case 4: // $FF95: OPL3 Bank 0 Data
+		m_opl3->write(1, data);
+		break;
+	case 5: // $FF96: OPL3 Bank 1 Address
+		m_opl3->write(2, data);
+		break;
+	case 6: // $FF97: OPL3 Bank 1 Data
+		m_opl3->write(3, data);
+		break;
+	case 7: // $FF98: SID Selector
+		m_sid_select = data & 0x7f;
+		break;
+	case 8: // $FF99: SID Data Write
+	{
+		uint8_t reg = m_sid_select & 0x1f;
+		uint8_t chip = (m_sid_select >> 5) & 0x03;
+		if (chip == 0) // Left
+			m_sid_l->write(reg, data);
+		else if (chip == 1) // Right
+			m_sid_r->write(reg, data);
+		else if (chip == 2) // Both
+		{
+			m_sid_l->write(reg, data);
+			m_sid_r->write(reg, data);
+		}
+		break;
+	}
+	}
 }
 
 // Hardware Mouse Cursor ($FEA0 - $FEA8)
@@ -2861,9 +3025,15 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 	map(0xfe02, 0xfe02).w(FUNC(wildbits_jr2_state::rst0_w));
 	map(0xfe03, 0xfe03).w(FUNC(wildbits_jr2_state::rst1_w));
 
+	// $FE04-$FE06: LFSR Random Number Generator
+	map(0xfe04, 0xfe06).rw(FUNC(wildbits_jr2_state::lfsr_r), FUNC(wildbits_jr2_state::lfsr_w));
+
 	// $FE07: Machine ID register
 	map(0xfe07, 0xfe07).r(FUNC(wildbits_jr2_state::mid_r));
 	map(0xfe08, 0xfe0f).r(FUNC(wildbits_jr2_state::pcbid_r));
+
+	// $FE10-$FE1F: Optical Keyboard Decode (fixed $55 on Jr2)
+	map(0xfe10, 0xfe1f).r(FUNC(wildbits_jr2_state::optkbd_r));
 
 	// $FE40-$FE4F: Real-Time Clock (bq4802)
 	map(0xfe40, 0xfe4f).rw(FUNC(wildbits_jr2_state::rtc_r), FUNC(wildbits_jr2_state::rtc_w));
@@ -2907,6 +3077,9 @@ void wildbits_jr2_state::wbjr2_mem(address_map &map)
 
 	// $FF90: Hardware Configuration DIP Switches
 	map(0xff90, 0xff90).r(FUNC(wildbits_jr2_state::dipsw_r));
+
+	// $FF91-$FF99: Consolidated Fixed I/O Sound Registers
+	map(0xff91, 0xff99).rw(FUNC(wildbits_jr2_state::sound_fixed_r), FUNC(wildbits_jr2_state::sound_fixed_w));
 
 	// $FFA0-$FFA1: MMU Control registers
 	map(0xffa0, 0xffa0).rw(FUNC(wildbits_jr2_state::mmu_mem_ctrl_r), FUNC(wildbits_jr2_state::mmu_mem_ctrl_w));
@@ -3724,6 +3897,11 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_last_mouse_x));
 	save_item(NAME(m_last_mouse_y));
 	save_item(NAME(m_last_mouse_btn));
+	save_item(NAME(m_lfsr));
+	save_item(NAME(m_lfsr_seed));
+	save_item(NAME(m_lfsr_ctrl));
+	save_item(NAME(m_lfsr_last_cycle));
+	save_item(NAME(m_sid_select));
 
 	// Hardware Line-Draw Accelerator taps on CPU address space for Page $C0 ($1080 - $10FF)
 	m_maincpu->space(AS_PROGRAM).install_read_tap(0x0000, 0xffff, "wbjr2_ld_r",
@@ -3747,7 +3925,7 @@ void wildbits_jr2_state::machine_start()
 						data = m_ld_color;
 						break;
 					case 2:
-						data = (m_ld_fifo_count >> 8) & 0x3f;
+						data = (m_ld_fifo_count >> 8) & 0x1f;
 						break;
 					case 3:
 						data = m_ld_fifo_count & 0xff;
@@ -3766,6 +3944,16 @@ void wildbits_jr2_state::machine_start()
 						break;
 					}
 				}
+				else if (blk_off >= 0x1100 && blk_off <= 0x11ff)
+				{
+					// TinyVicky Tilemap register readback returns constant $33 in RTL (TinyVicky_TL_Registers.v)
+					data = 0x33;
+				}
+			}
+			else if (block == 0xc4)
+			{
+				// Reading from Page $C4 returns open bus
+				data = 0xff;
 			}
 		});
 
@@ -3827,6 +4015,40 @@ void wildbits_jr2_state::machine_start()
 					}
 				}
 			}
+			else if (block == 0xc4)
+			{
+				uint16_t blk_off = offset & 0x1fff;
+				if (blk_off <= 0x001f) // $0000 - $001F: Left SID
+				{
+					m_sid_l->write(blk_off & 0x1f, data);
+				}
+				else if (blk_off >= 0x0080 && blk_off <= 0x009f) // $0080 - $009F: Both SIDs
+				{
+					m_sid_l->write(blk_off & 0x1f, data);
+					m_sid_r->write(blk_off & 0x1f, data);
+				}
+				else if (blk_off >= 0x0100 && blk_off <= 0x011f) // $0100 - $011F: Right SID
+				{
+					m_sid_r->write(blk_off & 0x1f, data);
+				}
+				else if (blk_off >= 0x0180 && blk_off <= 0x0183) // $0180 - $0183: Yamaha OPL3
+				{
+					m_opl3->write(blk_off & 0x03, data);
+				}
+				else if (blk_off >= 0x0200 && blk_off <= 0x0207) // $0200 - $0207: Left PSG
+				{
+					m_psg_l->write(data);
+				}
+				else if (blk_off >= 0x0208 && blk_off <= 0x020f) // $0208 - $020F: Both PSGs
+				{
+					m_psg_l->write(data);
+					m_psg_r->write(data);
+				}
+				else if (blk_off >= 0x0210 && blk_off <= 0x0217) // $0210 - $0217: Right PSG
+				{
+					m_psg_r->write(data);
+				}
+			}
 		});
 
 	m_is_turbo = false;
@@ -3867,6 +4089,11 @@ void wildbits_jr2_state::machine_reset()
 	m_sys1 = 0x00;
 	m_rst0 = 0x00;
 	m_rst1 = 0x00;
+	m_lfsr = 0;
+	m_lfsr_seed = 0;
+	m_lfsr_ctrl = 0;
+	m_lfsr_last_cycle = 0;
+	m_sid_select = 0;
 
 	// Reset Math Coprocessor
 	m_math_mulu_a = 0;
@@ -4084,6 +4311,28 @@ void wildbits_jr2_state::wbjr2(machine_config &config)
 	m_screen->set_raw(XTAL(25'175'000), 800, 0, 640, 525, 0, 480);
 	m_screen->set_screen_update(FUNC(wildbits_jr2_state::screen_update));
 	m_screen->screen_vblank().set(FUNC(wildbits_jr2_state::vblank_w));
+
+	// Audio
+	SPEAKER(config, "lspeaker").front_left();
+	SPEAKER(config, "rspeaker").front_right();
+
+	YMF262(config, m_opl3, XTAL(14'318'181));
+	m_opl3->add_route(0, "lspeaker", 0.50);
+	m_opl3->add_route(1, "rspeaker", 0.50);
+	m_opl3->add_route(2, "lspeaker", 0.50);
+	m_opl3->add_route(3, "rspeaker", 0.50);
+
+	SN76489(config, m_psg_l, XTAL(14'318'181) / 4);
+	m_psg_l->add_route(ALL_OUTPUTS, "lspeaker", 0.50);
+
+	SN76489(config, m_psg_r, XTAL(14'318'181) / 4);
+	m_psg_r->add_route(ALL_OUTPUTS, "rspeaker", 0.50);
+
+	MOS6581(config, m_sid_l, XTAL(14'318'181) / 14);
+	m_sid_l->add_route(ALL_OUTPUTS, "lspeaker", 0.50);
+
+	MOS6581(config, m_sid_r, XTAL(14'318'181) / 14);
+	m_sid_r->add_route(ALL_OUTPUTS, "rspeaker", 0.50);
 }
 
 struct key_map_entry {
@@ -4365,4 +4614,4 @@ ROM_END
 } // anonymous namespace
 
 //    YEAR  NAME    PARENT  COMPAT  MACHINE  INPUT  CLASS               INIT        COMPANY     FULLNAME                       FLAGS
-COMP( 2023, wbjr2,  0,      0,      wbjr2,   wbjr2, wildbits_jr2_state, empty_init, "Wildbits", "Wildbits Jr2 (FNX6809 Core)", MACHINE_NO_SOUND_HW )
+COMP( 2023, wbjr2,  0,      0,      wbjr2,   wbjr2, wildbits_jr2_state, empty_init, "Wildbits", "Wildbits Jr2 (FNX6809 Core)", MACHINE_SUPPORTS_SAVE )
