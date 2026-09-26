@@ -22,12 +22,17 @@
 #include "speaker.h"
 #include "osdepend.h"
 #include <queue>
+#include <deque>
 #include <vector>
 #include <cmath>
 #include <cstring>
 #include <limits>
 
 namespace {
+
+#define MINIMP3_IMPLEMENTATION
+#define MAX_FRAME_SYNC_MATCHES 2
+#include "minimp3/minimp3.h"
 
 static const uint8_t s_os9_bannerfont[2048] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0,
@@ -171,11 +176,12 @@ static const uint8_t s_os9_palette[64] = {
 	0xff, 0x88, 0x00, 0x00, 0xbb, 0xbb, 0xbb, 0x00,
 };
 
-class wildbits_jr2_state : public driver_device
+class wildbits_jr2_state : public driver_device, public device_sound_interface
 {
 public:
 	wildbits_jr2_state(const machine_config &mconfig, device_type type, const char *tag)
 		: driver_device(mconfig, type, tag)
+		, device_sound_interface(mconfig, *this)
 		, m_maincpu(*this, "maincpu")
 		, m_opl3(*this, "opl3")
 		, m_psg_l(*this, "psg_l")
@@ -204,6 +210,7 @@ protected:
 	virtual void machine_start() override ATTR_COLD;
 	virtual void machine_reset() override ATTR_COLD;
 	virtual void device_stop() override ATTR_COLD;
+	virtual void sound_stream_update(sound_stream &stream) override;
 
 private:
 	void wbjr2_mem(address_map &map) ATTR_COLD;
@@ -254,6 +261,8 @@ private:
 	void vs1053_w(offs_t offset, uint8_t data);
 	TIMER_CALLBACK_MEMBER(vs_midi_tick);
 	void vs_stop_smf();
+	void vs_stop_audio();
+	void vs_decode_audio();
 
 	// Real-Time Clock ($FE40 - $FE4F)
 	uint8_t rtc_r(offs_t offset);
@@ -458,6 +467,28 @@ private:
 	uint8_t m_vs_smf_running_status = 0;
 	emu_timer *m_vs_midi_timer = nullptr;
 	double m_vs_decode_seconds = 0.0;
+	sound_stream *m_stream = nullptr;
+	mp3dec_t m_mp3dec;
+	bool m_mp3_inited = false;
+	bool m_vs_decoding_audio = false;
+	std::deque<int16_t> m_pcm_fifo_l;
+	std::deque<int16_t> m_pcm_fifo_r;
+	uint64_t m_total_samples_played = 0;
+	uint32_t m_current_hz = 44100;
+
+	enum audio_format_t
+	{
+		FMT_NONE = 0,
+		FMT_MP3,
+		FMT_WAV
+	};
+
+	audio_format_t m_audio_format = FMT_NONE;
+	bool m_wav_header_parsed = false;
+	uint16_t m_wav_channels = 2;
+	uint16_t m_wav_bits = 16;
+	uint32_t m_wav_rate = 44100;
+	uint32_t m_wav_data_left = 0;
 
 	// SPI SD Card state
 	uint8_t m_sdc_stat;
@@ -2982,6 +3013,22 @@ uint8_t wildbits_jr2_state::vs1053_r(offs_t offset)
 			else
 				count = (uint16_t)buffered;
 		}
+		else if (m_vs_decoding_audio)
+		{
+			if (m_pcm_fifo_l.empty() && m_vs_sdi_buf.empty())
+			{
+				count = 0;
+			}
+			else if (!m_vs_sdi_buf.empty())
+			{
+				uint32_t queued = m_vs_sdi_buf.size();
+				count = (queued >= 2048) ? 2048 : (uint16_t)queued;
+			}
+			else
+			{
+				count = 1;
+			}
+		}
 		uint8_t stat = 0;
 		if (count == 0) stat |= 0x80; // Empty
 		if (count >= 2048) stat |= 0x40; // Full
@@ -3001,6 +3048,22 @@ uint8_t wildbits_jr2_state::vs1053_r(offs_t offset)
 				count = 2040 - (m_vs_smf_pos % 128);
 			else
 				count = (uint16_t)buffered;
+		}
+		else if (m_vs_decoding_audio)
+		{
+			if (m_pcm_fifo_l.empty() && m_vs_sdi_buf.empty())
+			{
+				count = 0;
+			}
+			else if (!m_vs_sdi_buf.empty())
+			{
+				uint32_t queued = m_vs_sdi_buf.size();
+				count = (queued >= 2048) ? 2048 : (uint16_t)queued;
+			}
+			else
+			{
+				count = 1;
+			}
 		}
 		return count & 0xff;
 	}
@@ -3026,6 +3089,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 		if (m_vs_ctrl & 0x08) // VS_RESET: hold chip XRESET low, restore boot defaults
 		{
 			vs_stop_smf();
+			vs_stop_audio();
 			memset(m_vs_sci, 0, sizeof(m_vs_sci));
 			m_vs_sci[0] = 0x0800; // MODE: SM_SDINEW
 			m_vs_sci[1] = 0x0048; // STATUS: VS1053b (version 4) + SS_APDOWN2 (analog powerdown)
@@ -3076,6 +3140,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 						if (val & 0x04) // SM_RESET
 						{
 							vs_stop_smf();
+							vs_stop_audio();
 							m_vs_sci[0] = 0x0800;
 							m_vs_sci[1] = 0x0048;
 							m_vs_sci[5] = 0x1f40;
@@ -3086,6 +3151,7 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 						if (val & 0x08) // SM_CANCEL
 						{
 							vs_stop_smf();
+							vs_stop_audio();
 							m_vs_sci[0] &= ~0x08; // clear cancel flag when done
 						}
 					}
@@ -3134,11 +3200,60 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 		}
 		else
 		{
-			// Standard MIDI File stream decoding
+			// Stream data handling
 			m_vs_sdi_buf.push_back(data);
 
-			if (!m_vs_playing_smf)
+			if (m_vs_playing_smf)
 			{
+				if (m_vs_smf_waiting_data)
+				{
+					if (m_vs_smf_pos == 22)
+					{
+						uint32_t save_pos = m_vs_smf_pos;
+						uint32_t delta = 0;
+						bool ok = false;
+						while (m_vs_smf_pos < m_vs_sdi_buf.size())
+						{
+							uint8_t b = m_vs_sdi_buf[m_vs_smf_pos++];
+							delta = (delta << 7) | (b & 0x7f);
+							if (!(b & 0x80))
+							{
+								ok = true;
+								break;
+							}
+						}
+						if (ok)
+						{
+							m_vs_smf_waiting_data = false;
+							m_vs_smf_retry_count = 0;
+							double dt = (double)delta * ((double)m_vs_smf_tempo_us / 1000000.0) / (double)m_vs_smf_division;
+							m_vs_decode_seconds += dt;
+							m_vs_sci[4] = (uint16_t)m_vs_decode_seconds;
+							if (m_vs_midi_timer)
+								m_vs_midi_timer->adjust(attotime::from_double(dt));
+						}
+						else
+						{
+							m_vs_smf_pos = save_pos;
+						}
+					}
+					else
+					{
+						m_vs_smf_waiting_data = false;
+						m_vs_smf_retry_count = 0;
+						if (m_vs_midi_timer)
+							m_vs_midi_timer->adjust(attotime::zero);
+					}
+				}
+			}
+			else if (m_vs_decoding_audio)
+			{
+				if ((m_audio_format == FMT_WAV && !m_wav_header_parsed) || m_vs_sdi_buf.size() >= 1024)
+					vs_decode_audio();
+			}
+			else
+			{
+				// Format detection
 				if (m_vs_sdi_buf.size() >= 22 &&
 				    m_vs_sdi_buf[0] == 'M' && m_vs_sdi_buf[1] == 'T' &&
 				    m_vs_sdi_buf[2] == 'h' && m_vs_sdi_buf[3] == 'd' &&
@@ -3188,51 +3303,57 @@ void wildbits_jr2_state::vs1053_w(offs_t offset, uint8_t data)
 							m_vs_midi_timer->adjust(attotime::from_double(dt));
 					}
 				}
-				else if (m_vs_sdi_buf.size() > 32 &&
+				else if (m_vs_sdi_buf.size() >= 12 &&
+				         m_vs_sdi_buf[0] == 'R' && m_vs_sdi_buf[1] == 'I' &&
+				         m_vs_sdi_buf[2] == 'F' && m_vs_sdi_buf[3] == 'F' &&
+				         m_vs_sdi_buf[8] == 'W' && m_vs_sdi_buf[9] == 'A' &&
+				         m_vs_sdi_buf[10] == 'V' && m_vs_sdi_buf[11] == 'E')
+				{
+					m_audio_format = FMT_WAV;
+					m_vs_decoding_audio = true;
+					m_vs_sci[9] = 0x7665;
+					m_vs_sci[4] = 0;
+					vs_decode_audio();
+				}
+				else if (m_vs_sdi_buf.size() >= 3 &&
+				         m_vs_sdi_buf[0] == 'I' && m_vs_sdi_buf[1] == 'D' &&
+				         m_vs_sdi_buf[2] == '3')
+				{
+					m_audio_format = FMT_MP3;
+					m_vs_decoding_audio = true;
+					m_vs_sci[9] = 0xffe0;
+					m_vs_sci[4] = 0;
+					vs_decode_audio();
+				}
+				else if (m_vs_sdi_buf.size() >= 2 &&
+				         m_vs_sdi_buf[0] == 0xff && (m_vs_sdi_buf[1] & 0xe0) == 0xe0)
+				{
+					m_audio_format = FMT_MP3;
+					m_vs_decoding_audio = true;
+					m_vs_sci[9] = 0xffe0;
+					m_vs_sci[4] = 0;
+					vs_decode_audio();
+				}
+				else if (m_vs_sdi_buf.size() > 64 &&
 				         (m_vs_sdi_buf[0] != 'M' || m_vs_sdi_buf[1] != 'T' ||
 				          m_vs_sdi_buf[2] != 'h' || m_vs_sdi_buf[3] != 'd'))
 				{
-					m_vs_sdi_buf.erase(m_vs_sdi_buf.begin());
-				}
-			}
-			else if (m_vs_playing_smf && m_vs_smf_waiting_data)
-			{
-				if (m_vs_smf_pos == 22)
-				{
-					uint32_t save_pos = m_vs_smf_pos;
-					uint32_t delta = 0;
-					bool ok = false;
-					while (m_vs_smf_pos < m_vs_sdi_buf.size())
+					bool found = false;
+					for (size_t i = 1; i + 4 <= m_vs_sdi_buf.size(); i++)
 					{
-						uint8_t b = m_vs_sdi_buf[m_vs_smf_pos++];
-						delta = (delta << 7) | (b & 0x7f);
-						if (!(b & 0x80))
+						if ((m_vs_sdi_buf[i] == 0xff && (m_vs_sdi_buf[i + 1] & 0xe0) == 0xe0) ||
+						    (m_vs_sdi_buf[i] == 'I' && m_vs_sdi_buf[i + 1] == 'D' && m_vs_sdi_buf[i + 2] == '3') ||
+						    (m_vs_sdi_buf[i] == 'R' && m_vs_sdi_buf[i + 1] == 'I' && m_vs_sdi_buf[i + 2] == 'F' && m_vs_sdi_buf[i + 3] == 'F'))
 						{
-							ok = true;
+							m_vs_sdi_buf.erase(m_vs_sdi_buf.begin(), m_vs_sdi_buf.begin() + i);
+							found = true;
 							break;
 						}
 					}
-					if (ok)
+					if (!found && m_vs_sdi_buf.size() > 128)
 					{
-						m_vs_smf_waiting_data = false;
-						m_vs_smf_retry_count = 0;
-						double dt = (double)delta * ((double)m_vs_smf_tempo_us / 1000000.0) / (double)m_vs_smf_division;
-						m_vs_decode_seconds += dt;
-						m_vs_sci[4] = (uint16_t)m_vs_decode_seconds;
-						if (m_vs_midi_timer)
-							m_vs_midi_timer->adjust(attotime::from_double(dt));
+						m_vs_sdi_buf.erase(m_vs_sdi_buf.begin());
 					}
-					else
-					{
-						m_vs_smf_pos = save_pos;
-					}
-				}
-				else
-				{
-					m_vs_smf_waiting_data = false;
-					m_vs_smf_retry_count = 0;
-					if (m_vs_midi_timer)
-						m_vs_midi_timer->adjust(attotime::zero);
 				}
 			}
 		}
@@ -3262,6 +3383,286 @@ void wildbits_jr2_state::vs_stop_smf()
 			m_midi_out->write(0x7b); // All Notes Off
 			m_midi_out->write(0x00);
 		}
+	}
+}
+
+void wildbits_jr2_state::vs_stop_audio()
+{
+	m_vs_decoding_audio = false;
+	m_audio_format = FMT_NONE;
+	m_wav_header_parsed = false;
+	m_wav_channels = 2;
+	m_wav_bits = 16;
+	m_wav_rate = 44100;
+	m_wav_data_left = 0;
+	m_mp3_inited = false;
+	m_pcm_fifo_l.clear();
+	m_pcm_fifo_r.clear();
+	m_vs_sdi_buf.clear();
+	m_total_samples_played = 0;
+	m_current_hz = 44100;
+	m_vs_sci[8] = 0;
+	m_vs_sci[9] = 0;
+	if (m_stream)
+		m_stream->set_sample_rate(44100);
+}
+
+void wildbits_jr2_state::vs_decode_audio()
+{
+	if (!m_vs_decoding_audio && m_audio_format == FMT_NONE)
+	{
+		// Format detection
+		if (m_vs_sdi_buf.size() >= 3 && m_vs_sdi_buf[0] == 'I' && m_vs_sdi_buf[1] == 'D' && m_vs_sdi_buf[2] == '3')
+		{
+			m_audio_format = FMT_MP3;
+			m_vs_decoding_audio = true;
+			m_vs_sci[9] = 0xffe0;
+			m_vs_sci[4] = 0;
+		}
+		else if (m_vs_sdi_buf.size() >= 4 && m_vs_sdi_buf[0] == 'R' && m_vs_sdi_buf[1] == 'I' && m_vs_sdi_buf[2] == 'F' && m_vs_sdi_buf[3] == 'F')
+		{
+			m_audio_format = FMT_WAV;
+			m_vs_decoding_audio = true;
+			m_vs_sci[9] = 0x7665;
+			m_vs_sci[4] = 0;
+		}
+		else if (m_vs_sdi_buf.size() >= 2 && m_vs_sdi_buf[0] == 0xff && (m_vs_sdi_buf[1] & 0xe0) == 0xe0)
+		{
+			m_audio_format = FMT_MP3;
+			m_vs_decoding_audio = true;
+			m_vs_sci[9] = 0xffe0;
+			m_vs_sci[4] = 0;
+		}
+	}
+
+	if (!m_vs_decoding_audio)
+		return;
+
+	if (m_audio_format == FMT_MP3)
+	{
+		// Strip ID3v2 tag if present at start
+		if (m_vs_sdi_buf.size() >= 10 && m_vs_sdi_buf[0] == 'I' && m_vs_sdi_buf[1] == 'D' && m_vs_sdi_buf[2] == '3')
+		{
+			uint32_t tag_len = 10 + (((uint32_t)(m_vs_sdi_buf[6] & 0x7f) << 21) |
+			                         ((uint32_t)(m_vs_sdi_buf[7] & 0x7f) << 14) |
+			                         ((uint32_t)(m_vs_sdi_buf[8] & 0x7f) << 7) |
+			                         (uint32_t)(m_vs_sdi_buf[9] & 0x7f));
+			if (m_vs_sdi_buf[5] & 0x10) // footer present
+				tag_len += 10;
+			if (m_vs_sdi_buf.size() >= tag_len)
+			{
+				m_vs_sdi_buf.erase(m_vs_sdi_buf.begin(), m_vs_sdi_buf.begin() + tag_len);
+			}
+			else
+			{
+				return;
+			}
+		}
+
+		if (!m_mp3_inited)
+		{
+			mp3dec_init(&m_mp3dec);
+			m_mp3_inited = true;
+		}
+
+		mp3d_sample_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
+		mp3dec_frame_info_t info;
+
+		while (m_pcm_fifo_l.size() < 16384 && m_vs_sdi_buf.size() >= 4)
+		{
+			int samples = mp3dec_decode_frame(&m_mp3dec, m_vs_sdi_buf.data(), m_vs_sdi_buf.size(), pcm, &info);
+			if (info.frame_bytes > 0)
+			{
+				if (samples > 0)
+				{
+					if (info.hz > 0 && (uint32_t)info.hz != m_current_hz)
+					{
+						m_current_hz = info.hz;
+						if (m_stream)
+							m_stream->set_sample_rate(m_current_hz);
+					}
+					m_vs_sci[5] = (m_current_hz & 0xfffe) | ((info.channels > 1) ? 1 : 0);
+					m_vs_sci[9] = 0xffe0;
+					m_vs_sci[8] = (info.bitrate_kbps << 8);
+
+					if (info.channels == 2)
+					{
+						for (int s = 0; s < samples; s++)
+						{
+							m_pcm_fifo_l.push_back(pcm[s * 2]);
+							m_pcm_fifo_r.push_back(pcm[s * 2 + 1]);
+						}
+					}
+					else
+					{
+						for (int s = 0; s < samples; s++)
+						{
+							m_pcm_fifo_l.push_back(pcm[s]);
+							m_pcm_fifo_r.push_back(pcm[s]);
+						}
+					}
+				}
+				size_t erase_len = (size_t)info.frame_bytes;
+				if (erase_len > m_vs_sdi_buf.size())
+					erase_len = m_vs_sdi_buf.size();
+				m_vs_sdi_buf.erase(m_vs_sdi_buf.begin(), m_vs_sdi_buf.begin() + erase_len);
+			}
+			else
+			{
+				break;
+			}
+		}
+	}
+	else if (m_audio_format == FMT_WAV)
+	{
+		if (!m_wav_header_parsed)
+		{
+			if (m_vs_sdi_buf.size() < 12)
+				return;
+
+			size_t pos = 12;
+			bool found_fmt = false;
+			bool found_data = false;
+			size_t data_start = 0;
+			uint32_t data_size = 0;
+
+			while (pos + 8 <= m_vs_sdi_buf.size())
+			{
+				uint32_t chunk_id = ((uint32_t)m_vs_sdi_buf[pos] << 24) |
+				                    ((uint32_t)m_vs_sdi_buf[pos + 1] << 16) |
+				                    ((uint32_t)m_vs_sdi_buf[pos + 2] << 8) |
+				                    (uint32_t)m_vs_sdi_buf[pos + 3];
+				uint32_t chunk_sz = (uint32_t)m_vs_sdi_buf[pos + 4] |
+				                    ((uint32_t)m_vs_sdi_buf[pos + 5] << 8) |
+				                    ((uint32_t)m_vs_sdi_buf[pos + 6] << 16) |
+				                    ((uint32_t)m_vs_sdi_buf[pos + 7] << 24);
+
+				if (chunk_id == 0x666d7420) // 'fmt '
+				{
+					if (pos + 8 + 16 <= m_vs_sdi_buf.size())
+					{
+						m_wav_channels = (uint16_t)m_vs_sdi_buf[pos + 10] | ((uint16_t)m_vs_sdi_buf[pos + 11] << 8);
+						m_wav_rate = (uint32_t)m_vs_sdi_buf[pos + 12] |
+						             ((uint32_t)m_vs_sdi_buf[pos + 13] << 8) |
+						             ((uint32_t)m_vs_sdi_buf[pos + 14] << 16) |
+						             ((uint32_t)m_vs_sdi_buf[pos + 15] << 24);
+						m_wav_bits = (uint16_t)m_vs_sdi_buf[pos + 22] | ((uint16_t)m_vs_sdi_buf[pos + 23] << 8);
+						found_fmt = true;
+					}
+					else
+					{
+						return;
+					}
+				}
+				else if (chunk_id == 0x64617461) // 'data'
+				{
+					found_data = true;
+					data_start = pos + 8;
+					data_size = chunk_sz;
+					break;
+				}
+
+				pos += 8 + chunk_sz;
+				if (chunk_sz & 1) pos++;
+			}
+
+			if (found_fmt && found_data && m_vs_sdi_buf.size() >= data_start)
+			{
+				m_wav_header_parsed = true;
+				m_wav_data_left = data_size;
+				if (m_wav_rate > 0 && m_wav_rate != m_current_hz)
+				{
+					m_current_hz = m_wav_rate;
+					if (m_stream)
+						m_stream->set_sample_rate(m_current_hz);
+				}
+				m_vs_sci[5] = (m_current_hz & 0xfffe) | ((m_wav_channels > 1) ? 1 : 0);
+				m_vs_sci[9] = 0x7665;
+				m_vs_sdi_buf.erase(m_vs_sdi_buf.begin(), m_vs_sdi_buf.begin() + data_start);
+			}
+			else
+			{
+				return;
+			}
+		}
+
+		size_t frame_bytes = (m_wav_bits / 8) * m_wav_channels;
+		if (frame_bytes == 0) frame_bytes = 2;
+
+		while (m_pcm_fifo_l.size() < 16384 && m_vs_sdi_buf.size() >= frame_bytes)
+		{
+			int16_t l = 0, r = 0;
+			if (m_wav_bits == 16)
+			{
+				if (m_wav_channels == 2)
+				{
+					l = (int16_t)((uint16_t)m_vs_sdi_buf[0] | ((uint16_t)m_vs_sdi_buf[1] << 8));
+					r = (int16_t)((uint16_t)m_vs_sdi_buf[2] | ((uint16_t)m_vs_sdi_buf[3] << 8));
+				}
+				else
+				{
+					l = r = (int16_t)((uint16_t)m_vs_sdi_buf[0] | ((uint16_t)m_vs_sdi_buf[1] << 8));
+				}
+			}
+			else if (m_wav_bits == 8)
+			{
+				if (m_wav_channels == 2)
+				{
+					l = ((int16_t)m_vs_sdi_buf[0] - 128) << 8;
+					r = ((int16_t)m_vs_sdi_buf[1] - 128) << 8;
+				}
+				else
+				{
+					l = r = ((int16_t)m_vs_sdi_buf[0] - 128) << 8;
+				}
+			}
+			m_pcm_fifo_l.push_back(l);
+			m_pcm_fifo_r.push_back(r);
+			m_vs_sdi_buf.erase(m_vs_sdi_buf.begin(), m_vs_sdi_buf.begin() + frame_bytes);
+		}
+	}
+}
+
+void wildbits_jr2_state::sound_stream_update(sound_stream &stream)
+{
+	if (m_vs_decoding_audio)
+	{
+		if (m_pcm_fifo_l.size() < 16384)
+			vs_decode_audio();
+
+		uint8_t atten_l = (m_vs_sci[11] >> 8) & 0xff;
+		uint8_t atten_r = m_vs_sci[11] & 0xff;
+		double vol_l = (atten_l >= 254) ? 0.0 : std::pow(10.0, -0.025 * atten_l);
+		double vol_r = (atten_r >= 254) ? 0.0 : std::pow(10.0, -0.025 * atten_r);
+
+		for (int s = 0; s < stream.samples(); s++)
+		{
+			if (!m_pcm_fifo_l.empty())
+			{
+				int16_t l = m_pcm_fifo_l.front();
+				m_pcm_fifo_l.pop_front();
+				int16_t r = m_pcm_fifo_r.empty() ? l : m_pcm_fifo_r.front();
+				if (!m_pcm_fifo_r.empty())
+					m_pcm_fifo_r.pop_front();
+
+				stream.put_clamp(0, s, (float)(l * vol_l / 32768.0));
+				stream.put_clamp(1, s, (float)(r * vol_r / 32768.0));
+				m_total_samples_played++;
+			}
+			else
+			{
+				stream.put(0, s, 0.0f);
+				stream.put(1, s, 0.0f);
+			}
+		}
+
+		if (m_current_hz > 0)
+			m_vs_sci[4] = (uint16_t)(m_total_samples_played / m_current_hz);
+	}
+	else
+	{
+		stream.fill(0, 0.0f);
+		stream.fill(1, 0.0f);
 	}
 }
 
@@ -4265,6 +4666,7 @@ void wildbits_jr2_state::machine_start()
 	m_timer0 = timer_alloc(FUNC(wildbits_jr2_state::timer0_tick), this);
 	m_timer1 = timer_alloc(FUNC(wildbits_jr2_state::timer1_tick), this);
 	m_vs_midi_timer = timer_alloc(FUNC(wildbits_jr2_state::vs_midi_tick), this);
+	m_stream = stream_alloc(0, 2, 44100);
 
 	// Probe host MIDI output ports and initialize default port if available
 	bool has_midi_out = false;
@@ -4729,11 +5131,14 @@ void wildbits_jr2_state::machine_reset()
 	memcpy(&m_vram_c0[0x1740], s_os9_palette, 64);
 
 	update_banks();
+	vs_stop_smf();
+	vs_stop_audio();
 }
 
 void wildbits_jr2_state::device_stop()
 {
 	vs_stop_smf();
+	vs_stop_audio();
 	printf("\n=== VRAM TEXT MATRIX SNAPSHOT ===\n");
 	for (int r = 0; r < 30; r++)
 	{
@@ -4802,6 +5207,9 @@ void wildbits_jr2_state::wbjr2(machine_config &config)
 	// Audio
 	SPEAKER(config, "lspeaker").front_left();
 	SPEAKER(config, "rspeaker").front_right();
+
+	add_route(0, "lspeaker", 0.70);
+	add_route(1, "rspeaker", 0.70);
 
 	YMF262(config, m_opl3, XTAL(14'318'181));
 	m_opl3->add_route(0, "lspeaker", 0.50);
