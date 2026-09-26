@@ -68,6 +68,32 @@
 > **Booting from DriveWire in MAME:** When running `./mame wbjr2` with pyDriveWire listening on port 65504, the emulated 16550 UART automatically bridges to pyDriveWire. In the FEU menu, press <kbd>o</kbd> (*Boot OS-9*), then <kbd>x</kbd> (*Boot OS-9 from DriveWire*).
 >
 > **Keyboard Input in MAME:** To toggle between MAME UI controls and direct keyboard input for the terminal/shell, press <kbd>Fn</kbd> + <kbd>Delete</kbd> (on Mac) or <kbd>Forward Delete</kbd> / <kbd>Scroll Lock</kbd> (on PC) until MAME displays *UI controls disabled*.
+>
+> **Playing MIDI Files (General MIDI with FluidSynth):**
+> 1. Download `FluidR3_GM.sf2` from https://musical-artifacts.com/artifacts/738 and place the file in `~/Library/Audio/Sounds/Banks/FluidR3_GM.sf2`:
+>    ```bash
+>    mkdir -p ~/Library/Audio/Sounds/Banks
+>    # Place the downloaded file at:
+>    # ~/Library/Audio/Sounds/Banks/FluidR3_GM.sf2
+>    ```
+> 2. In one terminal, start FluidSynth:
+>    ```bash
+>    fluidsynth -a coreaudio -m coremidi -s ~/Library/Audio/Sounds/Banks/FluidR3_GM.sf2
+>    ```
+> 3. In another terminal, run MAME (e.g. booting NitrOS-9 Level 2):
+>    ```bash
+>    ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
+>    ```
+>    Or autoboot directly into a MIDI song:
+>    ```bash
+>    ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk -autoboot_delay 3 -autoboot_command "vs -d SOUNDS/piano1.mid\n"
+>    ```
+> 4. Use the `vs` command from the NitrOS-9 shell to play MIDI files:
+>    ```bash
+>    vs -d SOUNDS/piano1.mid
+>    vs -d SOUNDS/band.mid
+>    vs -d SOUNDS/chords4.mid
+>    ```
 
 # MAME
 
