@@ -4847,6 +4847,30 @@ void wildbits_jr2_state::machine_start()
 						break;
 					}
 				}
+				else if (blk_off >= 0x1000 && blk_off <= 0x107f)
+				{
+					// Hardware TinyVicky Bitmap register block readback (TinyVicky_BM_Registers.v):
+					// Lower 5 bits Bus_A_i[4:0] decode BM0/BM1/BM2 registers; unmapped returns $66.
+					// Start addresses are read back in reversed Little-Endian order (Low, Mid, High).
+					uint8_t sub = blk_off & 0x1f;
+					if (sub < 0x18)
+					{
+						uint8_t base = sub & ~7;
+						uint8_t reg = sub & 7;
+						if (reg == 1)
+							data = m_vram_c0[0x1000 + base + 3]; // Addy Low
+						else if (reg == 2)
+							data = m_vram_c0[0x1000 + base + 2]; // Addy Mid
+						else if (reg == 3)
+							data = m_vram_c0[0x1000 + base + 1]; // Addy High
+						else
+							data = m_vram_c0[0x1000 + base + reg];
+					}
+					else
+					{
+						data = 0x66;
+					}
+				}
 				else if (blk_off >= 0x1100 && blk_off <= 0x11ff)
 				{
 					// TinyVicky Tilemap register readback returns constant $33 in RTL (TinyVicky_TL_Registers.v)
