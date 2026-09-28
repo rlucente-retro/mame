@@ -4685,19 +4685,26 @@ void wildbits_jr2_state::machine_start()
 	m_vs_midi_timer = timer_alloc(FUNC(wildbits_jr2_state::vs_midi_tick), this);
 	m_stream = stream_alloc(0, 2, 44100);
 
-	// Probe host MIDI output ports and initialize default port if available
+	// Probe host MIDI output ports and initialize port (preferring synthesizer/hardware over dummy Midi Through)
 	bool has_midi_out = false;
+	std::string selected_midi_port = "default";
 	for (const auto &port : machine().osd().list_midi_ports())
 	{
 		if (port.output)
 		{
 			has_midi_out = true;
-			break;
+			if (port.name.find("Through") == std::string::npos &&
+			    port.name.find("through") == std::string::npos)
+			{
+				selected_midi_port = port.name;
+				break;
+			}
 		}
 	}
 	if (has_midi_out)
 	{
-		m_midi_out = machine().osd().create_midi_output("default");
+		m_midi_out = machine().osd().create_midi_output(selected_midi_port);
+		osd_printf_verbose("Wildbits Jr2: Connected MIDI output to '%s'\n", selected_midi_port);
 	}
 
 	save_pointer(NAME(m_ram), 0x200000);
