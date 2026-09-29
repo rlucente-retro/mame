@@ -69,29 +69,74 @@
 >
 > **Keyboard Input in MAME:** To toggle between MAME UI controls and direct keyboard input for the terminal/shell, press <kbd>Fn</kbd> + <kbd>Delete</kbd> (on Mac) or <kbd>Forward Delete</kbd> / <kbd>Scroll Lock</kbd> (on PC) until MAME displays *UI controls disabled*.
 >
-> **Playing MIDI Files (Roland SC-55 / General MIDI with FluidSynth):**
-> 1. Download `Roland.SC-55.sf2` from https://github.com/nitro-shoe/sc-55-soundfont/releases/download/v1.34/Roland.SC-55.sf2 and place the file in `~/Library/Audio/Sounds/Banks/Roland.SC-55.sf2`:
->    ```bash
->    mkdir -p ~/Library/Audio/Sounds/Banks
->    curl -L -o ~/Library/Audio/Sounds/Banks/Roland.SC-55.sf2 https://github.com/nitro-shoe/sc-55-soundfont/releases/download/v1.34/Roland.SC-55.sf2
->    ```
-> 2. In one terminal, start FluidSynth:
->    ```bash
->    fluidsynth -a coreaudio -m coremidi -s ~/Library/Audio/Sounds/Banks/Roland.SC-55.sf2
->    ```
-> 3. In another terminal, run MAME (e.g. booting NitrOS-9 Level 2):
+> **Playing Audio & MIDI Files (Roland SC-55 / General MIDI with FluidSynth):**
+> 1. Download `Roland.SC-55.sf2` from https://github.com/nitro-shoe/sc-55-soundfont/releases/download/v1.34/Roland.SC-55.sf2:
+>    * **macOS:** Place the file in `~/Library/Audio/Sounds/Banks/Roland.SC-55.sf2`:
+>      ```bash
+>      mkdir -p ~/Library/Audio/Sounds/Banks
+>      curl -L -o ~/Library/Audio/Sounds/Banks/Roland.SC-55.sf2 https://github.com/nitro-shoe/sc-55-soundfont/releases/download/v1.34/Roland.SC-55.sf2
+>      ```
+>    * **Linux:** Place the soundfont in `/usr/share/sounds/sf2/Roland.SC-55.sf2`:
+>      ```bash
+>      sudo mkdir -p /usr/share/sounds/sf2
+>      sudo curl -L -o /usr/share/sounds/sf2/Roland.SC-55.sf2 https://github.com/nitro-shoe/sc-55-soundfont/releases/download/v1.34/Roland.SC-55.sf2
+>      ```
+> 2. Start FluidSynth:
+>    * **macOS:** Run in a terminal:
+>      ```bash
+>      fluidsynth -a coreaudio -m coremidi -s ~/Library/Audio/Sounds/Banks/Roland.SC-55.sf2
+>      ```
+>    * **Linux:**
+>      * *Option A (Interactive Terminal):* Use the PipeWire audio driver and ALSA sequencer:
+>        ```bash
+>        fluidsynth -a pipewire -m alsa_seq -r 48000 -z 512 -s /usr/share/sounds/sf2/Roland.SC-55.sf2
+>        ```
+>        *(Note: Always specify `-a pipewire`. Defaulting to ALSA directly can seize the physical audio hardware exclusively, blocking PipeWire and muting all emulated PCM audio in MAME.)*
+>      * *Option B (Systemd User Service):* Configure `~/.config/fluidsynth`:
+>        ```bash
+>        SOUND_FONT=/usr/share/sounds/sf2/Roland.SC-55.sf2
+>        OTHER_OPTS='-a pipewire -m alsa_seq -r 48000 -z 512'
+>        ```
+>        Then enable and start the service:
+>        ```bash
+>        systemctl --user enable --now fluidsynth
+>        ```
+> 3. Linux Audio Services & Volume Configuration:
+>    * Ensure `pipewire-pulse` is running so MAME's SDL audio backend can stream emulated PCM audio (VS1053 MP3/WAV, OPL3, PSG, SID):
+>      ```bash
+>      systemctl --user enable --now pipewire-pulse.socket pipewire-pulse.service
+>      ```
+>    * For HDMI / external TV output, set digital line-level unity gain (100% / 0 dB) so the display's volume controls act as the master:
+>      ```bash
+>      wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0
+>      ```
+> 4. In another terminal, run MAME (e.g. booting NitrOS-9 Level 2):
 >    ```bash
 >    ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
 >    ```
->    Or autoboot directly into a MIDI song:
+>    Or autoboot directly into a song:
 >    ```bash
+>    # MIDI playback:
 >    ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk -autoboot_delay 3 -autoboot_command "vs -d SOUNDS/piano1.mid\n"
+>
+>    # MP3 playback:
+>    ./mame wbjr2 -window -skip_gameinfo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk -autoboot_delay 3 -autoboot_command "vs -d SOUNDS/mobygo.mp3\n"
 >    ```
-> 4. Use the `vs` command from the NitrOS-9 shell to play MIDI files:
+> 5. Use the `vs` command from the NitrOS-9 shell to play audio files:
 >    ```bash
 >    vs -d SOUNDS/piano1.mid
 >    vs -d SOUNDS/band.mid
 >    vs -d SOUNDS/chords4.mid
+>    vs -d SOUNDS/mobygo.mp3
+>    ```
+>    *Volume Leveling Note:* NitrOS-9's `vtio` driver sets WM8776 headphone attenuation to `$60` (-25 dB) at boot to balance real hardware analog synthesizers. If MP3 playback sounds quieter than synthesized MIDI, raise the WM8776 headphone attenuation to 0 dB (`$79`) in the NitrOS-9 shell:
+>    ```
+>    wmset 00 79
+>    wmset 01 79
+>    ```
+>    or supply `-v 00` to `vs`:
+>    ```bash
+>    vs -v 00 -d SOUNDS/mobygo.mp3
 >    ```
 
 # MAME
