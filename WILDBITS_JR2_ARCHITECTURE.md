@@ -214,7 +214,7 @@ The 21-bit physical address bus maps the following resources:
   * `$1700 - $177F`: Text Mode Palettes (Foreground CLUT at `$1700`, Background CLUT at `$1740`; fully shadowed and **readable by CPU** since rc13).
 * **Block `$C1` (`0x182000`):** `FONT_BLK` & `GRAPH_LUT_BLK`:
   * `$0000 - $0FFF`: Dual 2 KB font banks (Font Set 0 at `$0000-$07FF`, Font Set 1 at `$0800-$0FFF`). Pre-initialized with OS-9 Bannerfont.
-  * `$1000 - $1FFF`: **4 Graphics CLUTs** (LUT0–3, 256 colors × 4 bytes `[Red, Green, Blue, Alpha]`).
+  * `$1000 - $1FFF`: **4 Graphics CLUTs** (LUT0–3, 256 colors × 4 bytes `[Blue, Green, Red, Alpha]`).
 * **Block `$C2` (`0x184000`):** Text Matrix character memory (80 columns × 60 rows = 4,800 bytes).
 * **Block `$C3` (`0x186000`):** Text Matrix color attribute memory (80 columns × 60 rows = 4,800 bytes; High nibble = Foreground palette 0..15, Low nibble = Background palette 0..15).
 * **Block `$C4` (`0x188000`):** Audio Synthesizer internal registers:
@@ -590,11 +590,12 @@ All multi-byte pointer and coordinate fields are stored high-byte first (standar
 | `11` | 8 × 8 | `$61` |
 
 * **Pixel Data Addressing:** Pointer points to physical 24-bit SRAM address (`Block * $2000 + Offset`), stored row-major at 1 byte per pixel.
-* **Graphics CLUTs (Page `$C1`, Offsets `$1000–$1FFF`):** Four 256-color palettes sharing Page `$C1` with fonts. Each entry is 4 bytes ordered `[Red, Green, Blue, Alpha]`:
+* **Graphics CLUTs (Page `$C1`, Offsets `$1000–$1FFF`):** Four 256-color palettes sharing Page `$C1` with fonts. Each entry is 4 bytes ordered `[Blue, Green, Red, Alpha]`:
   * `LUT0`: `$1000–$13FF` (Entry i at `$1000 + 4 * i`)
   * `LUT1`: `$1400–$17FF` (Entry i at `$1400 + 4 * i`)
   * `LUT2`: `$1800–$1BFF` (Entry i at `$1800 + 4 * i`)
   * `LUT3`: `$1C00–$1FFF` (Entry i at `$1C00 + 4 * i`)
+  * **Hardware Physical Byte Mapping (FPGA Block RAM):** In FPGA dual-port Block RAM (`TyVKY_LUT`), CPU Port A writes 8 bits per byte address while Graphics Engine Port B reads 32-bit entries. Address offset `+0` maps directly to data bits `[7:0]` (`VGE_Blue`), offset `+1` to `[15:8]` (`VGE_Green`), offset `+2` to `[23:16]` (`VGE_Red`), and offset `+3` to `[31:24]` (Alpha/Reserved). Client software MUST store colors in `[Blue, Green, Red, Alpha]` order.
 
 #### 5. Coordinate System & Off-Screen Margins:
 Sprite coordinates operate in a **32-pixel offset border space** allowing sprites to smoothly scroll entirely off any screen edge:

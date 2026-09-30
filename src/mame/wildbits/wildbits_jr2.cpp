@@ -4124,14 +4124,14 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 					{
 						uint8_t color_idx = (clut_grp << 4) | nib0;
 						uint16_t entry_offset = clut_base + color_idx * 4;
-						uint8_t r = m_vram_c1[entry_offset + 0];
+						uint8_t b = m_vram_c1[entry_offset + 0];
 						uint8_t g = m_vram_c1[entry_offset + 1];
-						uint8_t b = m_vram_c1[entry_offset + 2];
+						uint8_t r = m_vram_c1[entry_offset + 2];
 						if (gamma_en)
 						{
-							r = m_vram_c0[0x0000 + r];
+							b = m_vram_c0[0x0000 + b];
 							g = m_vram_c0[0x0400 + g];
-							b = m_vram_c0[0x0800 + b];
+							r = m_vram_c0[0x0800 + r];
 						}
 						rgb_t pen(r, g, b);
 						if (sx0 >= cliprect.min_x && sx0 <= cliprect.max_x)
@@ -4147,14 +4147,14 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 					{
 						uint8_t color_idx = (clut_grp << 4) | nib1;
 						uint16_t entry_offset = clut_base + color_idx * 4;
-						uint8_t r = m_vram_c1[entry_offset + 0];
+						uint8_t b = m_vram_c1[entry_offset + 0];
 						uint8_t g = m_vram_c1[entry_offset + 1];
-						uint8_t b = m_vram_c1[entry_offset + 2];
+						uint8_t r = m_vram_c1[entry_offset + 2];
 						if (gamma_en)
 						{
-							r = m_vram_c0[0x0000 + r];
+							b = m_vram_c0[0x0000 + b];
 							g = m_vram_c0[0x0400 + g];
-							b = m_vram_c0[0x0800 + b];
+							r = m_vram_c0[0x0800 + r];
 						}
 						rgb_t pen(r, g, b);
 						if (sx1 >= cliprect.min_x && sx1 <= cliprect.max_x)
@@ -4176,15 +4176,15 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 						continue; // Transparent pixel
 
 					uint16_t entry_offset = clut_base + color_idx * 4;
-					uint8_t r = m_vram_c1[entry_offset + 0];
+					uint8_t b = m_vram_c1[entry_offset + 0];
 					uint8_t g = m_vram_c1[entry_offset + 1];
-					uint8_t b = m_vram_c1[entry_offset + 2];
+					uint8_t r = m_vram_c1[entry_offset + 2];
 
 					if (gamma_en)
 					{
-						r = m_vram_c0[0x0000 + r];
+						b = m_vram_c0[0x0000 + b];
 						g = m_vram_c0[0x0400 + g];
-						b = m_vram_c0[0x0800 + b];
+						r = m_vram_c0[0x0800 + r];
 					}
 
 					rgb_t pen(r, g, b);
@@ -4283,15 +4283,15 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 						continue; // Transparent pixel
 
 					uint16_t entry_offset = clut_base + color_idx * 4;
-					uint8_t r = m_vram_c1[entry_offset + 0];
+					uint8_t b = m_vram_c1[entry_offset + 0];
 					uint8_t g = m_vram_c1[entry_offset + 1];
-					uint8_t b = m_vram_c1[entry_offset + 2];
+					uint8_t r = m_vram_c1[entry_offset + 2];
 
 					if (gamma_en)
 					{
-						r = m_vram_c0[0x0000 + r];
+						b = m_vram_c0[0x0000 + b];
 						g = m_vram_c0[0x0400 + g];
-						b = m_vram_c0[0x0800 + b];
+						r = m_vram_c0[0x0800 + r];
 					}
 
 					rgb_t pen(r, g, b);
@@ -4446,15 +4446,15 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 
 				uint16_t clut_base = 0x1000 + clut_idx * 0x0400;
 				uint16_t entry_offset = clut_base + color_idx * 4;
-				uint8_t r = m_vram_c1[entry_offset + 0];
+				uint8_t b = m_vram_c1[entry_offset + 0];
 				uint8_t g = m_vram_c1[entry_offset + 1];
-				uint8_t b = m_vram_c1[entry_offset + 2];
+				uint8_t r = m_vram_c1[entry_offset + 2];
 
 				if (gamma_en)
 				{
-					r = m_vram_c0[0x0000 + r];
+					b = m_vram_c0[0x0000 + b];
 					g = m_vram_c0[0x0400 + g];
-					b = m_vram_c0[0x0800 + b];
+					r = m_vram_c0[0x0800 + r];
 				}
 
 				rgb_t pen(r, g, b);
@@ -5266,10 +5266,10 @@ void wildbits_jr2_state::device_stop()
 	printf("MSTR_CTRL: [%02X, %02X] LAYER_CTRL: [%02X, %02X]\n", m_vky_mstr_ctrl_0, m_vky_mstr_ctrl_1, m_vky_layer_ctrl_0, m_vky_layer_ctrl_1);
 	printf("BM0: ctrl=%02X addr=%06X\n", m_vram_c0[0x1000], bm0_addr);
 	printf("CLUT0[0..3]: RGB(%02X,%02X,%02X) RGB(%02X,%02X,%02X) RGB(%02X,%02X,%02X) RGB(%02X,%02X,%02X)\n",
-		m_vram_c1[0x1000], m_vram_c1[0x1001], m_vram_c1[0x1002],
-		m_vram_c1[0x1004], m_vram_c1[0x1005], m_vram_c1[0x1006],
-		m_vram_c1[0x1008], m_vram_c1[0x1009], m_vram_c1[0x100a],
-		m_vram_c1[0x100c], m_vram_c1[0x100d], m_vram_c1[0x100e]);
+		m_vram_c1[0x1002], m_vram_c1[0x1001], m_vram_c1[0x1000],
+		m_vram_c1[0x1006], m_vram_c1[0x1005], m_vram_c1[0x1004],
+		m_vram_c1[0x100a], m_vram_c1[0x1009], m_vram_c1[0x1008],
+		m_vram_c1[0x100e], m_vram_c1[0x100d], m_vram_c1[0x100c]);
 	printf("RAM[bm0_addr..+7]: %02X %02X %02X %02X %02X %02X %02X %02X\n",
 		m_ram[bm0_addr & 0x1fffff], m_ram[(bm0_addr+1) & 0x1fffff], m_ram[(bm0_addr+2) & 0x1fffff], m_ram[(bm0_addr+3) & 0x1fffff],
 		m_ram[(bm0_addr+4) & 0x1fffff], m_ram[(bm0_addr+5) & 0x1fffff], m_ram[(bm0_addr+6) & 0x1fffff], m_ram[(bm0_addr+7) & 0x1fffff]);
