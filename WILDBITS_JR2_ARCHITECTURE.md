@@ -214,7 +214,7 @@ The 21-bit physical address bus maps the following resources:
   * `$1700 - $177F`: Text Mode Palettes (Foreground CLUT at `$1700`, Background CLUT at `$1740`; fully shadowed and **readable by CPU** since rc13).
 * **Block `$C1` (`0x182000`):** `FONT_BLK` & `GRAPH_LUT_BLK`:
   * `$0000 - $0FFF`: Dual 2 KB font banks (Font Set 0 at `$0000-$07FF`, Font Set 1 at `$0800-$0FFF`). Pre-initialized with OS-9 Bannerfont.
-  * `$1000 - $1FFF`: **4 Graphics CLUTs** (LUT0–3, 256 colors × 4 bytes `[Blue, Green, Red, Alpha]`).
+  * `$1000 - $1FFF`: **4 Graphics CLUTs** (LUT0–3, 256 colors × 4 bytes `[Red, Green, Blue, Alpha]`).
 * **Block `$C2` (`0x184000`):** Text Matrix character memory (80 columns × 60 rows = 4,800 bytes).
 * **Block `$C3` (`0x186000`):** Text Matrix color attribute memory (80 columns × 60 rows = 4,800 bytes; High nibble = Foreground palette 0..15, Low nibble = Background palette 0..15).
 * **Block `$C4` (`0x188000`):** Audio Synthesizer internal registers:
@@ -590,7 +590,7 @@ All multi-byte pointer and coordinate fields are stored high-byte first (standar
 | `11` | 8 × 8 | `$61` |
 
 * **Pixel Data Addressing:** Pointer points to physical 24-bit SRAM address (`Block * $2000 + Offset`), stored row-major at 1 byte per pixel.
-* **Graphics CLUTs (Page `$C1`, Offsets `$1000–$1FFF`):** Four 256-color palettes sharing Page `$C1` with fonts. Each entry is 4 bytes ordered `[Blue, Green, Red, Alpha]`:
+* **Graphics CLUTs (Page `$C1`, Offsets `$1000–$1FFF`):** Four 256-color palettes sharing Page `$C1` with fonts. Each entry is 4 bytes ordered `[Red, Green, Blue, Alpha]`:
   * `LUT0`: `$1000–$13FF` (Entry i at `$1000 + 4 * i`)
   * `LUT1`: `$1400–$17FF` (Entry i at `$1400 + 4 * i`)
   * `LUT2`: `$1800–$1BFF` (Entry i at `$1800 + 4 * i`)
