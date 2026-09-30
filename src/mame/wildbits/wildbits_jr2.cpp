@@ -371,6 +371,8 @@ private:
 	std::unique_ptr<uint8_t[]> m_vram_c2;     // Block $C2: Text Character Matrix
 	std::unique_ptr<uint8_t[]> m_vram_c3;     // Block $C3: Text Color Matrix
 	std::unique_ptr<uint8_t[]> m_vram_c4;     // Block $C4: Audio registers
+	std::unique_ptr<uint8_t[]> m_vram_c5;     // Block $C5: MemText FG/BG CLUTs
+	std::unique_ptr<uint8_t[]> m_vram_c6;     // Block $C6: MemText Font BRAM
 	uint8_t m_constant_ram[256];
 	uint8_t m_vector_ram[16];
 
@@ -596,8 +598,8 @@ uint8_t *wildbits_jr2_state::get_physical_block_ptr(uint8_t block_num)
 	// Blocks 0x40 - 0x7F (0x080000 - 0x0FFFFF): Flash ROM (512KB) or SRAM if FLASHDIS=1
 	// Blocks 0x80 - 0x9F (0x100000 - 0x13FFFF): Cartridge Port (/c0, /c1, 256KB) or SRAM if FLASHDIS=1
 	// Blocks 0xA0 - 0xBF (0x140000 - 0x17FFFF): Window A Expansion SRAM (256KB)
-	// Blocks 0xC0 - 0xC4 (0x180000 - 0x189FFF): Dedicated Video and Audio Block buffers (40KB)
-	// Blocks 0xC5 - 0xCF: Unmapped (88KB)
+	// Blocks 0xC0 - 0xC6 (0x180000 - 0x18DFFF): Dedicated Video, Audio & MemText BRAM buffers (56KB)
+	// Blocks 0xC7 - 0xCF: Unmapped (72KB)
 	// Blocks 0xD0 - 0xEF (0x1A0000 - 0x1DFFFF): Window B Expansion SRAM (256KB)
 	// Blocks 0xF0 - 0xFF: Unmapped (128KB)
 	if (block_num < 0x40)
@@ -641,6 +643,14 @@ uint8_t *wildbits_jr2_state::get_physical_block_ptr(uint8_t block_num)
 	else if (block_num == 0xc4)
 	{
 		return m_vram_c4.get();
+	}
+	else if (block_num == 0xc5)
+	{
+		return m_vram_c5.get();
+	}
+	else if (block_num == 0xc6)
+	{
+		return m_vram_c6.get();
 	}
 	else if (block_num >= 0xd0 && block_num < 0xf0)
 	{
@@ -2415,7 +2425,7 @@ uint8_t wildbits_jr2_state::dma_read_byte(uint32_t phys_addr)
 		return m_ram[block * 0x2000 + offset];
 	else if (block >= 0xd0 && block < 0xf0)
 		return m_ram[block * 0x2000 + offset];
-	return 0xff; // Internal FPGA BRAM ($C0-$C4), I/O ($C5-$CF), and unmapped ($F0-$FF)
+	return 0xff; // Internal FPGA BRAM ($C0-$C6), I/O ($C7-$CF), and unmapped ($F0-$FF)
 }
 
 void wildbits_jr2_state::dma_write_byte(uint32_t phys_addr, uint8_t data)
@@ -2447,7 +2457,7 @@ void wildbits_jr2_state::dma_write_byte(uint32_t phys_addr, uint8_t data)
 	{
 		m_ram[block * 0x2000 + offset] = data;
 	}
-	// Blocks $C0-$C4 (internal FPGA BRAM) are ignored by the SRAM DMA controller
+	// Blocks $C0-$C6 (internal FPGA BRAM) are ignored by the SRAM DMA controller
 }
 
 void wildbits_jr2_state::dma_execute()
@@ -2746,6 +2756,8 @@ void wildbits_jr2_state::vky_w(offs_t offset, uint8_t data)
 {
 	// TURBO_FASTIOWRITE: 24-tick fast I/O write frame (~8.39 MHz)
 	io_wait_write();
+	if (offset < 0x20)
+		m_vram_c0[offset] = data;
 	switch (offset)
 	{
 	case 0x00:
@@ -4329,7 +4341,6 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 			return;
 
 		int tile_size = (tm_ctrl & 0x10) ? 8 : 16; // 0 = 16x16, 1 = 8x8
-		uint8_t default_clut = (tm_ctrl >> 1) & 0x03;
 
 		// 24-bit physical RAM pointer to tilemap matrix
 		// Per defs/wildbits.d: +1: TLk_START_ADDY_H, +2: TLk_START_ADDY_M, +3: TLk_START_ADDY_L
@@ -4392,12 +4403,11 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				if (tile_idx == 0)
 					continue;
 
-				bool hflip = (tile_attr & 0x80) != 0;
-				bool vflip = (tile_attr & 0x40) != 0;
-				int fine_x = hflip ? ((tile_size - 1) - fine_x_orig) : fine_x_orig;
-				int fine_y = vflip ? ((tile_size - 1) - fine_y_orig) : fine_y_orig;
+				int fine_x = fine_x_orig;
+				int fine_y = fine_y_orig;
 
-				uint8_t ts = (tile_attr >> 1) & 0x07;
+				// Tile attribute Byte 1: [7:Reserved, 6:Collision, 5..3:CLUT (0..3), 2..0:TileSet (0..7)]
+				uint8_t ts = tile_attr & 0x07;
 				uint16_t ts_reg = 0x1180 + ts * 4;
 
 				// FNX6809 / Wildbits Jr2 Tileset registers (Page $C0 offsets $1180..$119F, per defs/wildbits.d):
@@ -4440,9 +4450,7 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				if (color_idx == 0)
 					continue; // Color index 0 is transparent
 
-				uint8_t clut_idx = default_clut;
-				if ((tile_attr & 0x01) && default_clut < 3)
-					clut_idx = default_clut + 1;
+				uint8_t clut_idx = (tile_attr >> 3) & 0x03;
 
 				uint16_t clut_base = 0x1000 + clut_idx * 0x0400;
 				uint16_t entry_offset = clut_base + color_idx * 4;
@@ -4551,89 +4559,149 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 	// Render Text Mode
 	if (text_en)
 	{
-		bool dbl_x = (m_vky_mstr_ctrl_1 & 0x02) != 0;
-		bool dbl_y = (m_vky_mstr_ctrl_1 & 0x04) != 0;
+		bool memtext_mode = ((m_vky_mstr_ctrl_1 & 0x40) != 0) && ((m_vram_c0[0x1200] & 0x01) != 0);
+		bool memtext_show_bg = (m_vky_mstr_ctrl_1 & 0x80) != 0;
 
-		const int cell_w = dbl_x ? 16 : 8;
-		const int cell_h = dbl_y ? 16 : 8;
-
-		const int cols = dbl_x ? 40 : 80;
-		const int rows = dbl_y ? (clk_70 ? 25 : 30) : (clk_70 ? 50 : 60);
-
-		const int x_scale = dbl_x ? 2 : 1;
-		const int y_scale = dbl_y ? 2 : 1;
-
-		for (int row = 0; row < rows; row++)
+		if (memtext_mode)
 		{
-			for (int col = 0; col < cols; col++)
+			bool font_8x16 = (m_vram_c0[0x1200] & 0x02) != 0;
+			int font_h = font_8x16 ? 16 : 8;
+			int cols = 80;
+			int rows = font_8x16 ? (clk_70 ? 25 : 30) : (clk_70 ? 50 : 60);
+
+			uint32_t text_base = ((uint32_t)m_vram_c0[0x1205] << 16) | ((uint32_t)m_vram_c0[0x1206] << 8) | m_vram_c0[0x1207];
+			uint32_t color_base = ((uint32_t)m_vram_c0[0x1209] << 16) | ((uint32_t)m_vram_c0[0x120a] << 8) | m_vram_c0[0x120b];
+
+			for (int row = 0; row < rows; row++)
 			{
-				int cell_idx = row * cols + col;
-				uint8_t ch = m_vram_c2[cell_idx];
-				uint8_t attr = m_vram_c3[cell_idx];
-
-				uint8_t fg_idx = (attr >> 4) & 0x0f;
-				uint8_t bg_idx = attr & 0x0f;
-
-				// Palette lookup from Block $C0 (FG at $1700, BG at $1740)
-				uint8_t fg_b = m_vram_c0[0x1700 + fg_idx * 4 + 0];
-				uint8_t fg_g = m_vram_c0[0x1700 + fg_idx * 4 + 1];
-				uint8_t fg_r = m_vram_c0[0x1700 + fg_idx * 4 + 2];
-				if (gamma_en)
+				for (int col = 0; col < cols; col++)
 				{
-					fg_b = m_vram_c0[0x0000 + fg_b];
-					fg_g = m_vram_c0[0x0400 + fg_g];
-					fg_r = m_vram_c0[0x0800 + fg_r];
-				}
-				rgb_t fg_pen(fg_r, fg_g, fg_b);
+					uint32_t cell_offset = ((uint32_t)row * 80 + col) * 2;
+					uint32_t text_addr = (text_base + cell_offset) & 0x1fffff;
+					uint32_t color_addr = (color_base + cell_offset) & 0x1fffff;
 
-				uint8_t bg_b = m_vram_c0[0x1740 + bg_idx * 4 + 0];
-				uint8_t bg_g = m_vram_c0[0x1740 + bg_idx * 4 + 1];
-				uint8_t bg_r = m_vram_c0[0x1740 + bg_idx * 4 + 2];
-				if (gamma_en)
-				{
-					bg_b = m_vram_c0[0x0000 + bg_b];
-					bg_g = m_vram_c0[0x0400 + bg_g];
-					bg_r = m_vram_c0[0x0800 + bg_r];
-				}
-				rgb_t bg_pen(bg_r, bg_g, bg_b);
+					uint8_t ch = m_ram[text_addr + 0];
+					uint8_t attr = m_ram[text_addr + 1];
+					uint8_t fg_idx = m_ram[color_addr + 0];
+					uint8_t bg_idx = m_ram[color_addr + 1];
 
-				// Render character cell
-				for (int cy = 0; cy < 8; cy++)
-				{
-					uint8_t glyph_row = m_vram_c1[font_base + ch * 8 + cy];
+					uint8_t font_slot = font_8x16 ? ((attr >> 1) & 0x01) : (attr & 0x03);
+					uint8_t fg_slot = (attr >> 2) & 0x01;
+					uint8_t bg_slot = (attr >> 3) & 0x01;
 
-					for (int dy = 0; dy < y_scale; dy++)
+					bool invert = (attr & 0x10) != 0;
+					if ((attr & 0x20) && ((m_frame_count / 16) & 1))
+						invert = !invert;
+
+					uint16_t fg_entry = ((fg_slot * 256 + fg_idx) * 4) & 0x03ff;
+					uint8_t fg_b = m_vram_c5[0x0000 + fg_entry + 0];
+					uint8_t fg_g = m_vram_c5[0x0000 + fg_entry + 1];
+					uint8_t fg_r = m_vram_c5[0x0000 + fg_entry + 2];
+					if (gamma_en)
 					{
-						int py = row * cell_h + cy * y_scale + dy;
-						if (py > cliprect.max_y)
-							break;
-						if (py < cliprect.min_y)
+						fg_b = m_vram_c0[0x0000 + fg_b];
+						fg_g = m_vram_c0[0x0400 + fg_g];
+						fg_r = m_vram_c0[0x0800 + fg_r];
+					}
+					rgb_t fg_pen(fg_r, fg_g, fg_b);
+
+					uint16_t bg_entry = ((bg_slot * 256 + bg_idx) * 4) & 0x03ff;
+					uint8_t bg_b = m_vram_c5[0x0800 + bg_entry + 0];
+					uint8_t bg_g = m_vram_c5[0x0800 + bg_entry + 1];
+					uint8_t bg_r = m_vram_c5[0x0800 + bg_entry + 2];
+					if (gamma_en)
+					{
+						bg_b = m_vram_c0[0x0000 + bg_b];
+						bg_g = m_vram_c0[0x0400 + bg_g];
+						bg_r = m_vram_c0[0x0800 + bg_r];
+					}
+					rgb_t bg_pen(bg_r, bg_g, bg_b);
+
+					bool bg_is_zero = (bg_idx == 0);
+
+					for (int cy = 0; cy < font_h; cy++)
+					{
+						uint16_t font_addr = font_8x16
+							? (uint16_t)((font_slot * 4096) + (ch * 16) + cy)
+							: (uint16_t)((font_slot * 2048) + (ch * 8) + cy);
+						uint8_t glyph_row = m_vram_c6[font_addr & 0x1fff];
+						if (invert)
+							glyph_row ^= 0xff;
+
+						int py = row * font_h + cy;
+						if (py > cliprect.max_y || py < cliprect.min_y)
 							continue;
 
-						uint32_t *dest = &bitmap.pix(py, col * cell_w);
+						uint32_t *dest = &bitmap.pix(py, col * 8);
 
 						for (int cx = 0; cx < 8; cx++)
 						{
+							int px = col * 8 + cx;
+							if (px < cliprect.min_x || px > cliprect.max_x)
+								continue;
+
 							bool is_fg = (glyph_row & (0x80 >> cx)) != 0;
 							if (is_fg)
 							{
-								for (int dx = 0; dx < x_scale; dx++)
+								dest[cx] = fg_pen;
+							}
+							else
+							{
+								if (!graph_en)
 								{
-									int px = col * cell_w + cx * x_scale + dx;
-									if (px >= cliprect.min_x && px <= cliprect.max_x)
-									{
-										dest[cx * x_scale + dx] = fg_pen;
-									}
+									dest[cx] = bg_pen;
+								}
+								else if (text_overlay)
+								{
+									if (memtext_show_bg && !bg_is_zero)
+										dest[cx] = bg_pen;
 								}
 							}
-							else if (!text_overlay)
+						}
+					}
+				}
+			}
+
+			// Render MemText hardware cursor
+			uint8_t crsr_ctrl = m_vram_c0[0x1201];
+			if (crsr_ctrl & 0x01)
+			{
+				bool crsr_flash = (crsr_ctrl & 0x04) != 0;
+				int flash_rate = (crsr_ctrl & 0x02) ? 16 : 32;
+				bool crsr_visible = !crsr_flash || (((m_frame_count / flash_rate) & 1) == 0);
+				if (crsr_visible)
+				{
+					int crsr_col = m_vram_c0[0x1202];
+					int crsr_row = m_vram_c0[0x1203];
+					if (crsr_col >= 0 && crsr_col < cols && crsr_row >= 0 && crsr_row < rows)
+					{
+						uint8_t cr_b = m_vram_c0[0x120d];
+						uint8_t cr_g = m_vram_c0[0x120e];
+						uint8_t cr_r = m_vram_c0[0x120f];
+						if (gamma_en)
+						{
+							cr_b = m_vram_c0[0x0000 + cr_b];
+							cr_g = m_vram_c0[0x0400 + cr_g];
+							cr_r = m_vram_c0[0x0800 + cr_r];
+						}
+						rgb_t crsr_pen(cr_r, cr_g, cr_b);
+
+						for (int cy = 0; cy < font_h; cy++)
+						{
+							uint8_t pat = m_vram_c0[0x1210 + cy];
+							int py = crsr_row * font_h + cy;
+							if (py >= cliprect.min_y && py <= cliprect.max_y)
 							{
-								for (int dx = 0; dx < x_scale; dx++)
+								uint32_t *dest = &bitmap.pix(py, crsr_col * 8);
+								for (int cx = 0; cx < 8; cx++)
 								{
-									int px = col * cell_w + cx * x_scale + dx;
-									if (px >= cliprect.min_x && px <= cliprect.max_x)
+									if (pat & (0x80 >> cx))
 									{
-										dest[cx * x_scale + dx] = bg_pen;
+										int px = crsr_col * 8 + cx;
+										if (px >= cliprect.min_x && px <= cliprect.max_x)
+										{
+											dest[cx] = crsr_pen;
+										}
 									}
 								}
 							}
@@ -4642,29 +4710,123 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				}
 			}
 		}
-
-		// Render TinyVicky hardware text cursor
-		if (m_vky_crsr_ctrl & 0x01)
+		else
 		{
-			bool blink = (m_vky_crsr_ctrl & 0x02) ? (((m_frame_count / 16) & 1) == 0) : true;
-			if (blink)
+			bool dbl_x = (m_vky_mstr_ctrl_1 & 0x02) != 0;
+			bool dbl_y = (m_vky_mstr_ctrl_1 & 0x04) != 0;
+
+			const int cell_w = dbl_x ? 16 : 8;
+			const int cell_h = dbl_y ? 16 : 8;
+
+			const int cols = dbl_x ? 40 : 80;
+			const int rows = dbl_y ? (clk_70 ? 25 : 30) : (clk_70 ? 50 : 60);
+
+			const int x_scale = dbl_x ? 2 : 1;
+			const int y_scale = dbl_y ? 2 : 1;
+
+			for (int row = 0; row < rows; row++)
 			{
-				int crsr_col = m_vky_crsr_x;
-				int crsr_row = m_vky_crsr_y;
-				if (crsr_col >= 0 && crsr_col < cols && crsr_row >= 0 && crsr_row < rows)
+				for (int col = 0; col < cols; col++)
 				{
-					for (int cy = 0; cy < cell_h; cy++)
+					int cell_idx = row * cols + col;
+					uint8_t ch = m_vram_c2[cell_idx];
+					uint8_t attr = m_vram_c3[cell_idx];
+
+					uint8_t fg_idx = (attr >> 4) & 0x0f;
+					uint8_t bg_idx = attr & 0x0f;
+
+					// Palette lookup from Block $C0 (FG at $1700, BG at $1740)
+					uint8_t fg_b = m_vram_c0[0x1700 + fg_idx * 4 + 0];
+					uint8_t fg_g = m_vram_c0[0x1700 + fg_idx * 4 + 1];
+					uint8_t fg_r = m_vram_c0[0x1700 + fg_idx * 4 + 2];
+					if (gamma_en)
 					{
-						int py = crsr_row * cell_h + cy;
-						if (py >= cliprect.min_y && py <= cliprect.max_y)
+						fg_b = m_vram_c0[0x0000 + fg_b];
+						fg_g = m_vram_c0[0x0400 + fg_g];
+						fg_r = m_vram_c0[0x0800 + fg_r];
+					}
+					rgb_t fg_pen(fg_r, fg_g, fg_b);
+
+					uint8_t bg_b = m_vram_c0[0x1740 + bg_idx * 4 + 0];
+					uint8_t bg_g = m_vram_c0[0x1740 + bg_idx * 4 + 1];
+					uint8_t bg_r = m_vram_c0[0x1740 + bg_idx * 4 + 2];
+					if (gamma_en)
+					{
+						bg_b = m_vram_c0[0x0000 + bg_b];
+						bg_g = m_vram_c0[0x0400 + bg_g];
+						bg_r = m_vram_c0[0x0800 + bg_r];
+					}
+					rgb_t bg_pen(bg_r, bg_g, bg_b);
+
+					// Render character cell
+					for (int cy = 0; cy < 8; cy++)
+					{
+						uint8_t glyph_row = m_vram_c1[font_base + ch * 8 + cy];
+
+						for (int dy = 0; dy < y_scale; dy++)
 						{
-							uint32_t *dest = &bitmap.pix(py, crsr_col * cell_w);
-							for (int cx = 0; cx < cell_w; cx++)
+							int py = row * cell_h + cy * y_scale + dy;
+							if (py > cliprect.max_y)
+								break;
+							if (py < cliprect.min_y)
+								continue;
+
+							uint32_t *dest = &bitmap.pix(py, col * cell_w);
+
+							for (int cx = 0; cx < 8; cx++)
 							{
-								int px = crsr_col * cell_w + cx;
-								if (px >= cliprect.min_x && px <= cliprect.max_x)
+								bool is_fg = (glyph_row & (0x80 >> cx)) != 0;
+								if (is_fg)
 								{
-									dest[cx] ^= 0x00ffffff;
+									for (int dx = 0; dx < x_scale; dx++)
+									{
+										int px = col * cell_w + cx * x_scale + dx;
+										if (px >= cliprect.min_x && px <= cliprect.max_x)
+										{
+											dest[cx * x_scale + dx] = fg_pen;
+										}
+									}
+								}
+								else if (!graph_en || !text_overlay || ((m_vky_mstr_ctrl_1 & 0x10) && bg_idx != 0))
+								{
+									for (int dx = 0; dx < x_scale; dx++)
+									{
+										int px = col * cell_w + cx * x_scale + dx;
+										if (px >= cliprect.min_x && px <= cliprect.max_x)
+										{
+											dest[cx * x_scale + dx] = bg_pen;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Render TinyVicky hardware text cursor
+			if (m_vky_crsr_ctrl & 0x01)
+			{
+				bool blink = (m_vky_crsr_ctrl & 0x02) ? (((m_frame_count / 16) & 1) == 0) : true;
+				if (blink)
+				{
+					int crsr_col = m_vky_crsr_x;
+					int crsr_row = m_vky_crsr_y;
+					if (crsr_col >= 0 && crsr_col < cols && crsr_row >= 0 && crsr_row < rows)
+					{
+						for (int cy = 0; cy < cell_h; cy++)
+						{
+							int py = crsr_row * cell_h + cy;
+							if (py >= cliprect.min_y && py <= cliprect.max_y)
+							{
+								uint32_t *dest = &bitmap.pix(py, crsr_col * cell_w);
+								for (int cx = 0; cx < cell_w; cx++)
+								{
+									int px = crsr_col * cell_w + cx;
+									if (px >= cliprect.min_x && px <= cliprect.max_x)
+									{
+										dest[cx] ^= 0x00ffffff;
+									}
 								}
 							}
 						}
@@ -4737,6 +4899,8 @@ void wildbits_jr2_state::machine_start()
 	m_vram_c2 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C2 (Text Matrix)
 	m_vram_c3 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C3 (Color Matrix)
 	m_vram_c4 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C4 (Audio)
+	m_vram_c5 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C5 (MemText FG/BG CLUTs)
+	m_vram_c6 = std::make_unique<uint8_t[]>(0x2000); // 8KB Block $C6 (MemText Font BRAM)
 
 	m_timer0 = timer_alloc(FUNC(wildbits_jr2_state::timer0_tick), this);
 	m_timer1 = timer_alloc(FUNC(wildbits_jr2_state::timer1_tick), this);
@@ -4772,6 +4936,8 @@ void wildbits_jr2_state::machine_start()
 	save_pointer(NAME(m_vram_c2), 0x2000);
 	save_pointer(NAME(m_vram_c3), 0x2000);
 	save_pointer(NAME(m_vram_c4), 0x2000);
+	save_pointer(NAME(m_vram_c5), 0x2000);
+	save_pointer(NAME(m_vram_c6), 0x2000);
 	save_item(NAME(m_constant_ram));
 	save_item(NAME(m_vector_ram));
 	save_item(NAME(m_mlut));
@@ -5230,14 +5396,28 @@ void wildbits_jr2_state::machine_reset()
 	memset(m_vram_c2.get(), 0x20, 0x2000); // Space filled text matrix
 	memset(m_vram_c3.get(), 0x7a, 0x2000); // Yellow on Purple authentic NitrOS-9 color
 	memset(m_vram_c4.get(), 0, 0x2000);
+	memset(m_vram_c5.get(), 0, 0x2000);
+	memset(m_vram_c6.get(), 0, 0x2000);
 
 	// Load Authentic OS-9 Bannerfont into Block $C1 (Font Set 0: $0000-$07FF and Font Set 1: $0800-$0FFF)
 	memcpy(&m_vram_c1[0x0000], s_os9_bannerfont, 2048);
 	memcpy(&m_vram_c1[0x0800], s_os9_bannerfont, 2048);
 
+	// Pre-load MemText Font BRAM in Block $C6 with authentic bannerfont
+	memcpy(&m_vram_c6[0x0000], s_os9_bannerfont, 2048);
+	memcpy(&m_vram_c6[0x0800], s_os9_bannerfont, 2048);
+
 	// Initialize Default Foreground and Background Text Palettes in Block $C0 ($1700 and $1740)
 	memcpy(&m_vram_c0[0x1700], s_os9_palette, 64);
 	memcpy(&m_vram_c0[0x1740], s_os9_palette, 64);
+
+	// Initialize MemText default registers ($1200-$121F) in Block $C0
+	m_vram_c0[0x120c] = 0x0a; // Precharge
+	m_vram_c0[0x120d] = 0x20; // Cursor B
+	m_vram_c0[0x120e] = 0x00; // Cursor G
+	m_vram_c0[0x120f] = 0x20; // Cursor R
+	m_vram_c0[0x1216] = 0xff; // Cursor Graphics x8
+	m_vram_c0[0x1217] = 0xff; // Cursor Graphics x8
 
 	update_banks();
 	vs_stop_smf();
