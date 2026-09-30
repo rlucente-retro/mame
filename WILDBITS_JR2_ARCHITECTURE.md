@@ -190,8 +190,8 @@ The 21-bit physical address bus maps the following resources:
 | `0x0FA000 - 0x0FFFFF` | 24 KB  | Blocks `$7D - $7F` | **Flash (Booter) / SRAM**| Power-on booter (`booter_0..2`) in normal mode; remapped to SRAM when `FLASHDIS = 1`. |
 | `0x100000 - 0x13FFFF` | 256 KB | Blocks `$80 - $9F` | **Cartridge Port / SRAM** | Dual external Flash cartridges (`/c0` @ `$80`, `/c1` @ `$90`) in normal mode; remapped to SRAM when `FLASHDIS = 1`. |
 | `0x140000 - 0x17FFFF` | 256 KB | Blocks `$A0 - $BF` | **RAM Window A** | High-speed SRAM expansion window (native chip address block × $2000, Foenix Memory Map Rev E). |
-| `0x180000 - 0x189FFF` | 40 KB  | Blocks `$C0 - $C4` | **Sectored I/O Pages** | Relocatable VICKY internal device, color LUT, and register pages. |
-| `0x18A000 - 0x19FFFF` | 88 KB  | Blocks `$C5 - $CF` | *No decode* | Undecoded space (marked `NotRAM` in 256-entry block map). |
+| `0x180000 - 0x18DFFF` | 56 KB  | Blocks `$C0 - $C6` | **Sectored I/O Pages** | Relocatable VICKY internal device, color LUTs, register pages, and MemText BRAM. |
+| `0x18E000 - 0x19FFFF` | 72 KB  | Blocks `$C7 - $CF` | *No decode* | Undecoded space (marked `NotRAM` in 256-entry block map). |
 | `0x1A0000 - 0x1DFFFF` | 256 KB | Blocks `$D0 - $EF` | **RAM Window B** | High-speed SRAM expansion window (identity address block × $2000, rc15+). |
 | `0x1E0000 - 0x1FFFFF` | 128 KB | Blocks `$F0 - $FF` | *No decode* | Undecoded space (marked `NotRAM` in 256-entry block map). |
 
@@ -201,8 +201,8 @@ The 21-bit physical address bus maps the following resources:
 > **1,792 KB RAM Decoding (rc16 + Max-RAM Kernel):** The onboard SRAM chip is 1M × 16 (2 MB). In standard mode, 1,024 KB is mapped (`$00–$3F` 512KB + `$A0–$BF` 256KB + `$D0–$EF` 256KB). When FLASHDIS mode is enabled (`$FFA1` bit 2 = 1), Blocks `$40–$9F` (96 blocks = 768 KB) are remapped from Flash/Cartridge to physical SRAM at chip addresses `0x080000 - 0x13FFFF`, yielding **1,792 KB (1.75 MB)** of total contiguous SRAM for NitrOS-9!
 > **RAM Window B Identity Addressing (rc15+):** In rc14, Window B was mapped at `0x200000 - 0x23FFFF` with an address fold and required a `+$30` offset in `vtio`'s `Blk2Addr`. Starting in rc15, Window B sits at its true identity address `0x1A0000 - 0x1DFFFF`, where absolute address = block × $2000 for CPU, VICKY, DMA, and debug port alike.
 
-#### Dedicated Sectored I/O Blocks (`$C0–$C4`):
-* **Block `$C0` (`0x180000`):** `GAMMA_BLK` / `TEXT_LUT_BLK` / `BITMAP_BLK` / `SPRITE_BLK` — Relocatable TinyVicky register block:
+#### Dedicated Sectored I/O Blocks (`$C0–$C6`):
+* **Block `$C0` (`0x180000`):** `GAMMA_BLK` / `TEXT_LUT_BLK` / `BITMAP_BLK` / `SPRITE_BLK` / `MEMTXT_REG` — Relocatable TinyVicky register block:
   * `$0000 - $00FF`: Gamma Blue lookup table (256 bytes).
   * `$0400 - $04FF`: Gamma Green lookup table (256 bytes).
   * `$0800 - $08FF`: Gamma Red lookup table (256 bytes).
@@ -210,6 +210,7 @@ The 21-bit physical address bus maps the following resources:
   * `$1000 - $1013`: Bitmap plane control registers & 24-bit physical start addresses (`BM0`, `BM1`, `BM2`).
   * `$1080 - $1087`: Line-Draw Accelerator (`TyVKY_LD_*`, Bresenham line-drawing engine with 4,096 × 34-bit pixel queue `LINEDRAW_AddyPixel_FIFO` for 320 × 240 8 bpp and 640 × 240 4 bpp HIRES4 graphics; rc18/rc17 third-cut pixel holding gate in `TyVKy2turbo_MMU_FNX6809.v` eliminates dropped pixels without requiring K2 video slot borrowing).
   * `$1100 - $119F`: Tilemap plane registers (`TL0`, `TL1`, `TL2`) and 8 tile set base address registers (`$1180–$119F`).
+  * `$1200 - $121F`: `CS_VICKY_MEMTXT_REG` — MemText hardware text engine control registers (`MEMTEXT_REG[0:31]`): mode enable, font size (8×8 vs 8×16), cursor control, cursor X/Y position, cursor color (B/G/R), cursor shape bitmaps, and 24-bit VRAM base address pointers for text matrix and color matrix.
   * `$1300 - $16FF`: **128 Hardware Sprite Attribute Records** (8 bytes each, Big-Endian).
   * `$1700 - $177F`: Text Mode Palettes (Foreground CLUT at `$1700`, Background CLUT at `$1740`; fully shadowed and **readable by CPU** since rc13).
 * **Block `$C1` (`0x182000`):** `FONT_BLK` & `GRAPH_LUT_BLK`:
@@ -230,6 +231,11 @@ The 21-bit physical address bus maps the following resources:
   * `$0200 - $0207`: `PSGL` (SN76489 Left Channel, 4 voices).
   * `$0208 - $020F`: `PSGM` (SN76489 Center / Mono Channel).
   * `$0210 - $0217`: `PSGR` (SN76489 Right Channel).
+* **Block `$C5` (`0x18A000`):** `IO_Sector_0xC5` / `IO_Block4_CS_i` — MemText Hardware Color Lookup Tables:
+  * `$0000 - $03FF`: MemText Foreground Color Lookup Table (`CS_LUT_FG`, 256 colors × 4 bytes `[Blue, Green, Red, Alpha]` in dual-port BRAM `FG_LUT`).
+  * `$0800 - $0BFF`: MemText Background Color Lookup Table (`CS_LUT_BG`, 256 colors × 4 bytes `[Blue, Green, Red, Alpha]` in dual-port BRAM `BG_LUT`).
+* **Block `$C6` (`0x18C000`):** `IO_Sector_0xC6` / `IO_Block5_CS_i` — MemText Hardware Font Memory:
+  * `$0000 - $1FFF`: 8 KB Dual-Port BRAM Font Bank (`MEM_TEXT_FONT`, supporting 2 banks of 8×8 font or 1 bank of 8×16 font).
 
 ---
 
@@ -366,8 +372,8 @@ The following register map details every active hardware device decoded in the f
 
 | Address Range | Device / Subsystem | Functionality |
 | :--- | :--- | :--- |
-| **`$FE00`** | `SYS0` (R/W) | **System Control 0:**<br>• Write: `[7:RESET, 5:CAP_EN, 4:BUZZ, 3:L1, 2:L0, 1:SD_L, 0:PWR_L]`<br>• Read: `[7:SD_WP, 6:SD_CD, 4:BUZZ, 3:L1, 2:L0, 1:SD_L, 0:PWR_L]` |
-| **`$FE01`** | `SYS1` (R/W) | **System Control 1:**<br>`[7..6:L1_RATE, 5..4:L0_RATE, 3:SID_ST, 2:PSG_ST, 1:L1_MN, 0:L0_MN]` |
+| **`$FE00`** | `SYS0` (R/W) | **System Control 0:**<br>• Write: `[7:RESET (armed with $FE02=$DE, $FE03=$AD), 5:CAP_EN, 4:BUZZ, 3:L1, 2:L0, 1:SD_L, 0:PWR_L]`<br>• Read: `[7:SD_WP (tied to 0), 6:SD_CD (0=card present, 1=empty), 5:CAP_EN, 4:BUZZ, 3:L1, 2:L0, 1:SD_L, 0:PWR_L]` |
+| **`$FE01`** | `SYS1` (R/W) | **System Control 1:**<br>`[7..6:L1_RATE, 5..4:L0_RATE, 3:SID_MONO, 2:PSG_MONO, 1:L1_MN, 0:L0_MN]` (Bits 3 & 2: 0=Stereo, 1=Mono) |
 | **`$FE02`** | `RST0` (R/W) | Write `$DE` to arm software reset |
 | **`$FE03`** | `RST1` (R/W) | Write `$AD` to arm software reset |
 | **`$FE04 - $FE05`** | `LFSR_RND` (R) | **16-Bit Pseudo-Random Number Output:** `$FE04` = Low byte (`LFSR_Data_Out[7:0]`), `$FE05` = High byte (`LFSR_Data_Out[15:8]`). |
@@ -411,7 +417,7 @@ The following register map details every active hardware device decoded in the f
 | **`$FF99`** | `SID_DAT` (W) | **SID Data Write:** Writes 8-bit data to register selected by `$FF98` on chosen SID chip(s). |
 | **`$FF9A - $FF9F`** | Unmapped (R) | **Unmapped Sound Space:** Reads return `$FF` (open-bus); writes ignored. |
 | **`$FFA0 - $FFAF`** | `MMU` (R/W) | **MMU Memory Control, I/O Control, Slot 0..7 Mapping:**<br>• `$FFA0`: Task Register (`[5:4:EDIT_LUT, 1:0:ACT_LUT]`)<br>• `$FFA1`: I/O Control (`[7:FLASHDIS_IMPL (R), 2:FLASHDIS (R/W), 1:VEC_RAM, 0:CONST_RAM]`)<br>• `$FFA8–$FFAF`: Slot 0–7 block mappings.<br>• *rc16 Inhibit:* Writes do not leak into Slot 7 RAM. |
-| **`$FFC0 - $FFDF`** | `VICKY` (R/W) | **TinyVicky II Video Registers:**<br>• `$FFC0`: `MASTER_CTRL_0` (`[6:GAMMA, 5:SPRITE, 4:TILE, 3:BITMAP, 2:GRAPH, 1:OVRLY, 0:TEXT]`)<br>• `$FFC1`: `MASTER_CTRL_1` (`[5:FON_SET, 4:FON_OVLY, 3:MON_SLP, 2:DBL_Y, 1:DBL_X, 0:CLK_70]`)<br>• `$FFC2-$FFC3`: `LAYER_CTRL_0/1`<br>• `$FFC4-$FFC9`: Border Control (`ENABLE`, `SCROLL_X`, `B/G/R`, `WIDTH`, `HEIGHT`)<br>• **`$FFCA`**: `VKY_DRAWLINE_CTRL` (`MASTER_CTRL_2`: Bit 0 = `Mstr_Ctrl_DrawLine_Enable`, must be 1 for LineDraw accelerator to operate)<br>• **`$FFCB`**: `VKY_GFX_MODE` (`[Bit 0: GFX_HIRES4 (640x240x16c), Bits 3..1: GFX_GROUP]` rc14+)<br>• `$FFCD-$FFCF`: Graphics Background Color (`B, G, R`)<br>• `$FFD0-$FFD7`: Text Cursor Control (`ENABLE`, `FLASH_DIS`, `RATE`, `CCH`, `CCO`, `CURX`, `CURY`)<br>• `$FFD8-$FFDB`: Line IRQ Control & Raster Beam Counters (`RAST_COL`, `RAST_ROW`) |
+| **`$FFC0 - $FFDF`** | `VICKY` (R/W) | **TinyVicky II Video Registers:**<br>• `$FFC0`: `MASTER_CTRL_0` (`[6:GAMMA, 5:SPRITE, 4:TILE, 3:BITMAP, 2:GRAPH, 1:OVRLY, 0:TEXT]`)<br>• `$FFC1`: `MASTER_CTRL_1` (`[7:MEMTEXT_SHOW_BG, 6:MEMTEXT_EN, 5:FON_SET, 4:FON_OVLY, 3:MON_SLP, 2:DBL_Y, 1:DBL_X, 0:CLK_70]`)<br>• `$FFC2-$FFC3`: `LAYER_CTRL_0/1`<br>• `$FFC4-$FFC9`: Border Control (`ENABLE`, `SCROLL_X`, `B/G/R`, `WIDTH`, `HEIGHT`)<br>• **`$FFCA`**: `VKY_DRAWLINE_CTRL` (`MASTER_CTRL_2`: Bit 0 = `Mstr_Ctrl_DrawLine_Enable`, must be 1 for LineDraw accelerator to operate)<br>• **`$FFCB`**: `VKY_GFX_MODE` (`[Bit 0: GFX_HIRES4 (640x240x16c), Bits 3..1: GFX_GROUP]` rc14+)<br>• `$FFCD-$FFCF`: Graphics Background Color (`B, G, R`)<br>• `$FFD0-$FFD7`: Text Cursor Control (`ENABLE`, `FLASH_DIS`, `RATE`, `CCH`, `CCO`, `CURX`, `CURY`)<br>• `$FFD8-$FFDB`: Line IRQ Control & Raster Beam Counters (`RAST_COL`, `RAST_ROW`) |
 | **`$FFE0 - $FFEF`** | `FPU` (R/W) | **Hardware Floating-Point Unit:**<br>• `$FFE0-$FFE3`: Control 0..3 (converters, add/sub select, valid strobes)<br>• `$FFE4-$FFE7`: Status (Multiply, Divide, Add/Sub, Converter valid/flags)<br>• `$FFE8-$FFEB`: Operand A / Add-Sub Result (32-bit big-endian)<br>• `$FFEC-$FFEF`: Operand B / Converter Result (32-bit big-endian) |
 | **`$FFF0 - $FFFF`** | `VECTORS` (R/W)| **6809 Hardware Interrupt / Reset Vectors:**<br>• `$FFF0-$FFF1`: Reserved<br>• `$FFF2-$FFF3`: `SWI3`<br>• `$FFF4-$FFF5`: `SWI2`<br>• `$FFF6-$FFF7`: `FIRQ`<br>• `$FFF8-$FFF9`: `IRQ`<br>• `$FFFA-$FFFB`: `SWI`<br>• `$FFFC-$FFFD`: `NMI`<br>• `$FFFE-$FFFF`: `RESET` |
 
@@ -436,8 +442,13 @@ To prevent architectural pollution and driver errors, the following hardware sub
 
 ### 4.1 Master Control & Text Scaling
 
-TinyVicky II text mode geometry is governed by **Master Control Register 1 (`$FFC1`)**:
+TinyVicky II text mode geometry and hardware text features are governed by **Master Control Register 1 (`$FFC1`)**:
 
+* **Bit 7 (`Mstr_Ctrl_MemText_ShowBG`):** Controls background color rendering in MemText graphics overlay mode (`1` = Show background color from background CLUT; `0` = Suppress background color / transparent when background color index is 0).
+* **Bit 6 (`Mstr_Ctrl_MemText_Enable`):** Master enable for the MemText hardware text engine (`1` = MemText active, reading character and color streams directly from system SRAM via base pointers; `0` = MemText engine disabled, reverting to traditional static text matrix BRAM at Blocks `$C2`/`$C3`).
+* **Bit 5 (`FON_SET` = `$20`):** Selects active hardware font bank in Block `$C1` (`0` = Font Set 0 at `$0000–$07FF`, `1` = Font Set 1 at `$0800–$0FFF`).
+* **Bit 4 (`FON_OVLY` = `$10`):** Font overlay mode enable (`1` = Text characters rendered over active graphics layers).
+* **Bit 3 (`MON_SLP` = `$08`):** Monitor sleep / DPMS power management (`1` = Disable video sync outputs).
 * **Bit 2 (`DBL_Y` = `$04`):** Doubles character height (16 scanlines per character row).
   * When `DBL_Y = 1`: **30 rows** in 60Hz (480 / 16) or **25 rows** in 70Hz (400 / 16).
   * When `DBL_Y = 0`: **60 rows** in 60Hz (480 / 8) or **50 rows** in 70Hz (400 / 8).
@@ -821,17 +832,78 @@ Sprites composite between the three graphics layers using the 2-bit `SPRITE_DEPT
 * `11` = Behind Layer 2 (total background, in front of background color).
 
 #### 3. Tilemap Cell Attribute Encoding (Byte 1):
-Each tile cell in tilemap VRAM consists of 2 bytes (Byte 0: Tile Index, Byte 1: Attributes):
-* **Bit 7:** Horizontal Flip (X-flip / mirror horizontal).
-* **Bit 6:** Vertical Flip (Y-flip / mirror vertical).
-* **Bits 5..4:** Tile Layer Priority over sprites.
-* **Bits 3..1:** Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
-* **Bit 0:** Palette / CLUT Bank Offset.
+Each tile cell in tilemap VRAM consists of 2 contiguous bytes in physical SRAM:
+* **Byte 0 (Even Address):** Tile Number / Index (0..255).
+* **Byte 1 (Odd Address - Attributes):**
+  * **Bits 2..0 (`Active_Tile_Data[10:8]`):** Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at Page `$C0` offsets `$1180–$119F`).
+  * **Bits 5..3 (`Active_Tile_Data[13:11]`):** Graphics Palette / CLUT Select (0..3 selecting Graphics CLUT 0..3 in Block `$C1` at `$1000–$1FFF`).
+  * **Bit 6 (`Active_Tile_Data[14]`):** Collision Enable (unconnected / omitted in synthesis on Jr2).
+  * **Bit 7 (`Active_Tile_Data[15]`):** Reserved.
+
+> [!IMPORTANT]
+> **No Hardware Tile Flipping in TinyVicky II:** Unlike legacy C256 Foenix literature which claimed bits 7 and 6 encoded horizontal and vertical flip, the TinyVicky II RTL (`source/TyVKY_TileMap_SM.v`) implements **neither horizontal nor vertical tile flipping**. Bits 2..0 select the Tile Set (0..7) and bits 5..3 select the CLUT (0..3). Attempting to use bits 7 or 6 for tile flipping or placing the CLUT in bit 0 results in miscolored tiles (e.g. blue/yellow palette shifts).
 
 #### 4. Hardware Collision Detection Policy:
 * **Omitted from FPGA Synthesis on Jr2:** On the large C256 Foenix (VICKY II), hardware sprite-to-sprite and sprite-to-bitmap collision detection logic was implemented with dedicated interrupts (`VEC_INT11_COL0` and `VEC_INT12_COL1`) and register latches (`BM_CONTROL_REG` bit 6).
 * **Jr2 Hardware Truth:** To fit the 6809 CPU core, MMU, triple SID, triple PSG, SAM2695 MIDI, and DMA inside the Artix-7 35T's 20,800 LUTs, hardware collision logic was completely omitted from synthesis.
 * **Emulation Rule for MAME:** In `tinyvicky_device`, sprite-to-sprite and sprite-to-tile collisions are **100% software-calculated** by client programs via bounding-box coordinate math. The Jr2 interrupt controller (`IRQ_Controller_Jr.v`) has zero collision interrupt inputs, and no collision status registers exist in the address map.
+
+---
+
+### 4.9 MemText Hardware VRAM Text Engine (`$FFC1` & Page `$C0` `$1200–$121F`)
+
+In addition to the legacy static text matrix (which utilizes dedicated BRAM blocks at MMU Block `$C2` for characters and `$C3` for attributes), TinyVicky II incorporates an advanced **MemText (Memory-Backed Text) Engine** (`source/F256x_MEMTEXT_SM.v`).
+
+#### 1. Operating Principle & Architecture:
+* Rather than requiring CPU writes to static internal BRAM, MemText dynamically streams character indices and color attributes directly from system SRAM (VRAM) line-by-line during horizontal blanking and active display.
+* Programmable 24-bit base pointers allow double-buffering, hardware scrolling, and multiple virtual text screens anywhere in the 2 MB physical SRAM address space.
+* At every character row boundary (every 8 scanlines for 8×8 font, or every 16 scanlines for 8×16 font), the engine fetches 160 bytes of character/attribute data and 160 bytes of color data from SRAM into internal dual-port line buffers (`TEXT_MEMORY` and `COLOR_MEMORY`).
+
+#### 2. Register Interface (Page `$C0` Offsets `$1200–$121F`, `CS_VICKY_MEMTXT_REG`):
+The MemText engine is configured via 32 registers in Page `$C0`:
+* **`$1200` (`MEMTEXT_REG[0]` - MemText Control):**
+  * Bit 0: `MemTextModeEnable` — Local engine enable (must be 1 for MemText to display; also requires master enable `$FFC1[6] = 1` and text mode `$FFC0[0] = 1`).
+  * Bit 1: `MemTextModeSize` — Font height select (`0` = 8×8 font / 60 character rows; `1` = 8×16 font / 30 character rows).
+* **`$1201` (`MEMTEXT_REG[1]` - Cursor Control):**
+  * Bit 0: `Cursor_Enable` — Enables hardware cursor display.
+  * Bit 1: `Cursor_Rate_Low` — Cursor blink rate low bit.
+  * Bit 2: `Cursor_Rate_Hi` — Cursor blink rate high bit.
+  * Bit 3: `Font_Bank_Low` — Selects font bank in Block `$C6`.
+  * Bit 4: `Font_Bank_Hi` — Selects font bank in Block `$C6`.
+  * Bit 5: `Font_Size` — Cursor font size (`0` = 8×8, `1` = 8×16).
+* **`$1202` (`MEMTEXT_REG[2]`):** `MemTextCursorX` — Cursor horizontal column (`0..79`).
+* **`$1203` (`MEMTEXT_REG[3]`):** `MemTextCursorY` — Cursor vertical row (`0..59` in 8×8 mode, `0..29` in 8×16 mode).
+* **`$1204`:** Reserved (`$00`).
+* **`$1205–$1207` (`MEMTEXT_REG[5..7]`):** `MEMTXT_START_ADDY` — 24-bit physical SRAM start address pointer for text characters and attributes:
+  * `$1205`: Start Address High bits 23..16.
+  * `$1206`: Start Address Mid bits 15..8.
+  * `$1207`: Start Address Low bits 7..0.
+* **`$1208`:** Reserved (`$00`).
+* **`$1209–$120B` (`MEMTEXT_REG[9..11]`):** `MEMCLR_START_ADDY` — 24-bit physical SRAM start address pointer for text color memory:
+  * `$1209`: Color Address High bits 23..16.
+  * `$120A`: Color Address Mid bits 15..8.
+  * `$120B`: Color Address Low bits 7..0.
+* **`$120C` (`MEMTEXT_REG[12]`):** Horizontal Pre-Charge latency constant (default `$0A`).
+* **`$120D–$120F` (`MEMTEXT_REG[13..15]`):** Hardware Cursor 24-bit RGB Color:
+  * `$120D`: Blue component (default `$20`).
+  * `$120E`: Green component (default `$00`).
+  * `$120F`: Red component (default `$20`).
+* **`$1210–$1217` (`MEMTEXT_REG[16..23]`):** Cursor graphics bitmap pattern for 8×8 mode (8 bytes; default `$00,$00,$00,$00,$00,$00,$FF,$FF` creating an underline cursor).
+* **`$1218–$121F` (`MEMTEXT_REG[24..31]`):** Cursor graphics bitmap pattern for 8×16 mode (8 additional bytes for scanlines 8..15).
+
+#### 3. Dedicated BRAM Memory Blocks:
+* **Block `$C5` (`0x18A000 - 0x18BFFF`, `IO_Sector_0xC5` / `IO_Block4_CS_i`):**
+  * `$0000 - $03FF`: MemText Foreground Color Lookup Table (`FG_LUT`, 256 entries × 4 bytes `[Blue, Green, Red, Alpha]`).
+  * `$0800 - $0BFF`: MemText Background Color Lookup Table (`BG_LUT`, 256 entries × 4 bytes `[Blue, Green, Red, Alpha]`).
+* **Block `$C6` (`0x18C000 - 0x18DFFF`, `IO_Sector_0xC6` / `IO_Block5_CS_i`):**
+  * `$0000 - $1FFF`: 8 KB Dual-Port BRAM Font Bank (`MEM_TEXT_FONT`, holding up to 512 8×8 characters or 256 8×16 characters).
+
+#### 4. Compositor Mixing & Overlay Behavior (`GraphicOutputMixer.v`):
+* MemText participates in final video generation through the master compositor in `GraphicOutputMixer.v`:
+  * When `Mstr_Ctrl_MemText_Enable = 1` (`$FFC1` bit 6) and `Text_Mode_Enable = 1` (`$FFC0` bit 0):
+    * If `Graphic_Mode_Enable = 0` (`$FFC0` bit 3), MemText is displayed exclusively: `RGB = {MEMTEXT_Red, MEMTEXT_Green, MEMTEXT_Blue}`.
+    * If `Graphic_Mode_Enable = 1` and `Text_Overlay_Enable = 1` (`$FFC0` bit 2), MemText overlays on top of the underlying bitmap/tile graphics plane.
+    * If `Mstr_Ctrl_MemText_ShowBG = 0` (`$FFC1` bit 7), background color index 0 is rendered completely transparent, allowing bitmap and tile layers to show through character backgrounds.
 
 ---
 
@@ -1505,7 +1577,7 @@ When Page `$C4` is mapped into a CPU slot (e.g. `Slot 2` via `$FFAA = $C4`, appe
     * Diagnostics & Control: `vs` alone runs self-test chain, `-t` sine wave test, `-m` memory test, `-r` reset, `-i` chip state and GPIO pins, `-v <hh>` volume, `-c <hh>` clock override, `-g` disable GBUF, `-b` background stream playback.
   * **Plugin Directory (`/SYS/VSPLUGINS`):** Houses loadable binary DSP patches: `switcher.plg`, `rtmidistart.plg`, `rtmidistop.plg`, and `vs1053b_patches.plg`.
   * **Audio Samples (`/SOUNDS`):** 15 sample audio tracks packaged directly on `l2_wildbitsjr2.dsk`.
-* **Interrupt Routing:** Incoming MIDI streaming data from the VS1053b asserts `INT_MIDI_VS_RX` on Interrupt Group 3, bit 4 (`NEW_Rx_FIFO_MIDI_VS_Sync`).
+* **Interrupt Routing:** In `source/Jr2 Code/TinyVKY2_IO_Page0_Devices.v:2088`, input `.MIDI_VS_Rx_IRQn_i( 1'b1 )` is permanently tied high (inactive). Group 3 bit 4 (`INT_MIDI_VS_RX`) never asserts on Wildbits Jr2 hardware; VS1053b streaming drivers rely strictly on hardware status polling (`$FF50` BUSY, `$FF54` SDI FIFO count/status).
 
 #### 6. Yamaha OPL3 FM Synthesizer (Fixed I/O `$FF94–$FF97` & Page `$C4` Offsets `$0180–$0183`):
 * **Hardware Truth:** The FPGA core integrates an authentic Yamaha OPL3 (YMF262) FM synthesizer engine, providing rich multi-operator FM music synthesis.
@@ -1670,8 +1742,8 @@ The Wildbits Jr2 features an **onboard physical 8-position DIP switch bank** sit
     * Data strobe `IO_Data_Valid_o` is asserted at tick 13 and deasserted at tick 21 (a 9-tick window matching 25 MHz I/O domain edge requirements).
     * Clock E is held on the stock edge (tick 16), while Q falls early at tick 21 (matching a fast-read frame). The frame wraps at tick 23.
     * Excluded: MMU control tables (`CS_MMU`), external bus accesses (RTC, Flash, Cartridge), read cycles, DMA active cycles, and debug cycles.
-  * **16-Tick Dead/Internal Coast Cycles:**
-    * Cycles where `AVMA = 0` during the preceding cycle coast in 16 ticks (12.58 MHz) with the bus idled and SRAM given entirely to the TinyVicky graphics engine.
+  * **12-Tick Dead/Internal Coast Cycles (`ShortFrame`):**
+    * Cycles where `AVMA = 0` during the preceding cycle coast with `FrameEnd = 5'd11`, completing in **12 ticks at 200 MHz = 60 ns (16.67 MHz effective speed)** with the external bus idled and SRAM given entirely to the TinyVicky graphics engine.
   * **32-Tick Standard Peripheral Cycles:**
     * Flash ROM, Cartridge/EXRAM, MMU tables (`$FFA0–$FFAF`), interrupt vectors (`$FFF0–$FFFF`), peripheral I/O reads, and RTC accesses retain standard 32-tick (160 ns = 6.29 MHz) timing with RDY wait-state handling.
 * **`FASTWR_LATE2` Bus Timing Geometry (`v8_rc11`):**
@@ -1796,15 +1868,27 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * In the 32-line interrupt controller (`IRQ_Controller_Jr.v`), there are no collision interrupt lines (Group 0 only has SOF and SOL). In `defs/wildbits.d`, no collision registers exist.
 * **MAME Implementation:** Collision handling is 100% software-calculated by checking sprite bounding boxes. MAME does not allocate or emulate hardware collision registers.
 
-### 9.3 Tilemap Cell Attribute Format (Byte 1)
-* **Hardware Truth:** Each 2-byte tile cell in tilemap VRAM encodes:
-  * **Byte 0:** Tile Index (0..255).
-  * **Byte 1 (Attributes):**
-    * Bit 7: Horizontal Flip (X-flip).
-    * Bit 6: Vertical Flip (Y-flip).
-    * Bits 5..4: Per-tile priority over sprites.
-    * Bits 3..1: Tile Set Select (0..7 referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
-    * Bit 0: Palette / CLUT Bank Offset.
+### 9.3 Tilemap Cell Attribute Format & Graphics CLUT Channel Order
+* **Hardware Truth (`source/TyVKY_TileMap_SM.v` & `source/TyVKYVGE_Pixel_Encoder.v`):**
+  * Each 2-byte tile cell in tilemap VRAM encodes:
+    * **Byte 0 (Even Address):** Tile Number / Index (`Active_Tile_Data[7:0]`, `0..255`).
+    * **Byte 1 (Odd Address - Attributes):**
+      * Bits 2..0 (`Active_Tile_Data[10:8]`): Tile Set Select (`0..7` referencing base addresses `TILE_MAP_ADDY0..7` at `$1180–$119F`).
+      * Bits 5..3 (`Active_Tile_Data[13:11]`): Graphics Palette / CLUT Select (`0..3` selecting Graphics CLUT 0..3 in Block `$C1` at `$1000–$1FFF`).
+      * Bit 6 (`Active_Tile_Data[14]`): Collision Enable (unconnected / omitted in synthesis on Jr2).
+      * Bit 7 (`Active_Tile_Data[15]`): Reserved.
+  * **No Hardware Tile Flipping:** There is no horizontal or vertical flip logic anywhere in `TyVKY_TileMap_SM.v`.
+* **Graphics CLUT 32-Bit BRAM Unpacking & Channel Order:**
+  * In `TyVKY_LUT` (`source/TyVKYVGE_Pixel_Encoder.v` lines 535–560), the 4 Graphics CLUTs (LUT0–3 in Block `$C1` at `$1000–$1FFF`) are stored as 256 entries × 4 bytes `[Blue, Green, Red, Alpha]`:
+    * Byte 0: Blue (`[7:0]`)
+    * Byte 1: Green (`[15:8]`)
+    * Byte 2: Red (`[23:16]`)
+    * Byte 3: Alpha / Unused (`[31:24]`)
+  * `GraphicOutputMixer.v` (lines 158–160) assigns:
+    * `VGE_Red = VGE_RGB_Pixel[23:16]` (Byte 2)
+    * `VGE_Green = VGE_RGB_Pixel[15:8]` (Byte 1)
+    * `VGE_Blue = VGE_RGB_Pixel[7:0]` (Byte 0)
+  * **Resolution of `tltest` Color Shift:** If an emulator unpacks Byte 0 as Red and Byte 2 as Blue, or decodes tile attribute bit 0 as palette select instead of bits 5..3, pure Red becomes Blue, and Cyan (Blue+Green) becomes Yellow (Red+Green), causing `/dd/tests/tltest` to display inverted blue/yellow colors instead of the designed red/cyan playfield.
 
 ### 9.4 Synthesizer Clock Enable Frequencies
 * **Hardware Truth:** Clocks are derived from the master 100 MHz system clock and 25.175 MHz dot clock:
@@ -1845,7 +1929,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * **Dual-Speed SPI:** Boot default is `IO_Clk / 16 = 1.57 MHz`; setting `CTRL` bit 2 (`VS_FAST`) restores `IO_Clk / 4 = 6.29 MHz` once the internal PLL clock multiplier is configured.
   * **Reset:** `CTRL` bit 3 (`VS_RESET`) drives the physical VS1053b XRESET line low, flushes the SDI FIFO, and idles the bit engine.
   * **PCB GPIO1 Strap & Workarounds:** Pin 34 (GPIO1) tied to VCC on one Jr2 PCB run puts the chip into real-time MIDI synth mode. Hardware fix is a solder bridge between pin 33 (GPIO0) and pin 34 (GPIO1), verified by `vs -i` reporting `GPIO0 = 1`. Software workaround is `/SYS/VSPLUGINS/switcher.plg` (`vs -o`).
-  * **Interrupt:** Asserts `INT_MIDI_VS_RX` on Interrupt Group 3, bit 4 (`NEW_Rx_FIFO_MIDI_VS_Sync`).
+  * **Interrupt Status:** Group 3 bit 4 (`INT_MIDI_VS_RX`) is permanently tied inactive (`1'b1`) in the Jr2 FPGA RTL (`Jr2 Code/TinyVKY2_IO_Page0_Devices.v:2088`). The VS1053b does not assert hardware CPU interrupts on Jr2; all streaming flow control is handled by DREQ and software polling of SDI FIFO registers at `$FF54–$FF55`.
   * **Software Tooling:** The dedicated `vs` command utility in `/CMDS` on `l2_wildbitsjr2.dsk` (**Edition 12**, 9,096 B) provides file playback (MP3, OGG, WAV, AAC, WMA, Format 0 MID) with automatic file-type clock scaling, built-in switcher patch deployment, and hardware verification tests.
 
 ### 9.7 Pre-Loaded BRAM Assets (Bannerfont & Default Palette)
@@ -2013,8 +2097,8 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * **24-Tick Fast I/O Writes (`FastIoTail`, `TURBO_FASTIOWRITE`, rc18+):**
     * Shortened 24-tick frame for CPU writes to `$Cx` sectored pages and fixed I/O pages (`$FDxx–$FFxx`).
     * `FastIoPred` decided at tick 11; `IO_Data_Valid_o` asserted ticks 13..21 (9 ticks matching 25 MHz I/O edge requirements); stock E at tick 16; fast Q falling at tick 21.
-  * **16-Tick Dead/Internal Coast Cycles:**
-    * Dead/internal cycles (`AVMA = 0`) complete in 16 ticks (12.58 MHz) with the bus idled and SRAM given to graphics.
+  * **12-Tick Dead/Internal Coast Cycles (`ShortFrame`):**
+    * Dead/internal cycles (`AVMA = 0`) engage `ShortFrame` with `FrameEnd = 5'd11`, completing in **12 ticks at 200 MHz = 60 ns (16.67 MHz effective speed)** with the bus idled and SRAM given to graphics.
   * **32-Tick Standard Cycles:**
     * Flash ROM, Cartridge/EXRAM, MMU tables (`$FFA0–$FFAF`), vectors, and peripheral reads retain standard 32-tick (160 ns = 6.29 MHz) timing.
   * **DIP Switch Turbo Gate:** Onboard DIP switch `SW_BOOT_MODE0` (`$FF90` bit 0, active-low: `0` = Turbo enabled, `1` = Stock 6.29 MHz).
@@ -2066,11 +2150,12 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **RC20 DMA Overhaul (`$FEC0–$FED7`)** | **Logic Ops & Data Integrity Fixes:** COPY, OR, AND, XOR, MASK, NOT; bit 7 reads 1 = implemented; `DMA_CanStart` VBLANK hand-off safety; `VRAM_1D_ST00B` first-byte latency wait state; `Op_Fill_Done` op fill boundary check; `Rd_Lane`/`Op_S_Lane`/`Wr_Lane` physical SRAM byte-lane alignment; `OP_WR0` ALU pipeline settling; 8-clock post-transfer bus drain | `TinyVKY_DMA_Controller.v` & `TinyVicky_MemoryManagementBlock.v` (commit `8e67004`) |
 | **UART Fractional Baud Timing** | **BAUDCE 22.1184 MHz:** `BaudAcc` reset to 0 on `RST_i`; `uart_baudgen.vhd` terminal count evaluated inside `CE = '1'` (0.0% drift) | `SuperIO_JR.v` & `uart_baudgen.vhd` (commit `3235d75`) |
 | **Synchronous Reset System** | **Domain Sync & Holds:** `WildbitsResetSync` 3-stage local synchronizers; `WildbitsResetManager` 26-bit cold hold & 19-bit stable hold | `TyVKy2K2x1_MMU_Register.v` (commit `33cabe0`) |
-| **12 MHz Turbo Mode** | **Adaptive Scheduler (`v8_rc19` / `v8_rc20`):** 16-tick RAM reads (12.5 MHz fetch, `K2_FASTREAD16`), 24-tick fast RAM writes (8.33 MHz), 24-tick fast I/O writes (`TURBO_FASTIOWRITE`), 16-tick coast cycles (12.58 MHz), 32-tick standard peripheral cycles; DIP switch `SW_BOOT_MODE0` active-low turbo gate | `TyVKy2K2turbo_MMU_FNX6809.v` (commits `894b197` & `50cde01`) |
+| **12 MHz Turbo Mode** | **Adaptive Scheduler (`v8_rc19` / `v8_rc20`):** 16-tick RAM reads (12.5 MHz fetch, `K2_FASTREAD16`), 24-tick fast RAM writes (8.33 MHz), 24-tick fast I/O writes (`TURBO_FASTIOWRITE`), 12-tick coast cycles (16.67 MHz, `ShortFrame` `FrameEnd=11`), 32-tick standard peripheral cycles; DIP switch `SW_BOOT_MODE0` active-low turbo gate | `TyVKy2K2turbo_MMU_FNX6809.v` (commits `894b197` & `50cde01`) |
 | **Layer Control 0 (`$FFC2`)** | `[7:4]` = Layer 1 source, `[3:0]` = Layer 0 source (`0..2` BM, `4..6` TM) | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
 | **Layer Control 1 (`$FFC3`)** | `[3:0]` = Layer 2 source (`0..2` BM, `4..6` TM), `[7:4]` reserved | NitrOS-9 `vtio.asm` (`SS.PScrn`) |
 | **Sprite Collision** | **None** (100% software bounding-box calculations; no hardware registers) | `IRQ_Controller_Jr.v` & `defs/wildbits.d` |
-| **Tile Attributes** | Byte 1: `[7:HFlip, 6:VFlip, 5..4:Priority, 3..1:TileSet, 0:Palette]` | `TinyVKY2_IO_Page0_Devices.v` |
+| **Tile Attributes & CLUT** | Byte 0: Tile Index (`0..255`); Byte 1: `[7:Reserved, 6:Collision, 5..3:CLUT (0..3), 2..0:TileSet (0..7)]`; no hardware tile flipping; CLUT stored as `[Blue, Green, Red, Alpha]` | `source/TyVKY_TileMap_SM.v` & `TyVKYVGE_Pixel_Encoder.v` |
+| **MemText Engine** | **VRAM Text Mode & BRAM Blocks:** Master enable `$FFC1[6]`, Show BG `$FFC1[7]`; Page `$C0` registers `$1200–$121F` (`MEMTEXT_REG[0:31]`); FG/BG CLUTs at Block `$C5`; 8 KB Font at Block `$C6`; 24-bit VRAM base address pointers | `source/F256x_MEMTEXT_SM.v` & `GraphicOutputMixer.v` |
 | **Soft-SID Clock** | **1,022,727 Hz** (Commodore 64 NTSC pitch clock enable) | `CFP95139AJR2_Top.v` |
 | **Soft-PSG Clock** | **3,579,545 Hz** (NTSC colorburst pitch clock enable) | `CFP95139AJR2_Top.v` |
 | **OPL3 FM Synthesizer** | **Yamaha YMF262 at fixed I/O `$FF94–$FF97` and Block `$C4` offsets `$0180–$0183`** (physical `0x188180–0x188183`; stereo third term into master audio DAC) | `YM262_top.v` & `SID_OPL3_Interface.v` |
