@@ -338,7 +338,6 @@ private:
 	// Hardware Line-Draw Accelerator ($1080 - $1087 in Page $C0, $FFCA)
 	void linedraw_execute();
 
-	void io_wait(int cycles = 0);
 	void io_wait_read();
 	void io_wait_write();
 	bool m_is_turbo;
@@ -713,20 +712,6 @@ void wildbits_jr2_state::io_wait_write()
 	m_io_write_frac ^= 1;
 	if (m_io_write_frac)
 		m_maincpu->eat_cycles(1);
-}
-
-void wildbits_jr2_state::io_wait(int cycles)
-{
-	if (!m_is_turbo)
-		return;
-
-	if (cycles > 0)
-	{
-		m_maincpu->eat_cycles(cycles);
-		return;
-	}
-
-	io_wait_read();
 }
 
 uint8_t wildbits_jr2_state::mmu_mem_ctrl_r()
