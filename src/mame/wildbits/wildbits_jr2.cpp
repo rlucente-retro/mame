@@ -20,6 +20,7 @@
 #include "sound/ymopl.h"
 #include "sound/sn76496.h"
 #include "sound/mos6581.h"
+#include "sound/sp0250.h"
 #include "speaker.h"
 #include "osdepend.h"
 #include <queue>
@@ -189,6 +190,7 @@ public:
 		, m_psg_r(*this, "psg_r")
 		, m_sid_l(*this, "sid_l")
 		, m_sid_r(*this, "sid_r")
+		, m_speech(*this, "speech")
 		, m_sdcard(*this, "sdcard")
 		, m_via(*this, "via0")
 		, m_screen(*this, "screen")
@@ -366,6 +368,7 @@ private:
 	required_device<sn76489_device> m_psg_r;
 	required_device<mos6581_device> m_sid_l;
 	required_device<mos6581_device> m_sid_r;
+	required_device<sp0250_device> m_speech;
 	required_device<spi_sdcard_device> m_sdcard;
 	required_device<via6522_device> m_via;
 	required_device<screen_device> m_screen;
@@ -605,6 +608,9 @@ private:
 	uint8_t m_ld_y1;
 	bool m_ld_done;
 	uint16_t m_ld_fifo_count;
+
+	// TinyVicky Sprite Mirroring ($1880 - $18FF in Page $FC, RC27)
+	uint8_t m_sprite_mirror[128];
 
 	// Keyboard, DIP Switch & Mouse Input Ports
 	required_ioport_array<4> m_io_key;
@@ -2767,10 +2773,12 @@ void wildbits_jr2_state::dma_execute()
 	uint32_t dst = ((uint32_t)m_dma_reg[9] << 16) | ((uint32_t)m_dma_reg[10] << 8) | m_dma_reg[11];
 	uint8_t fill_byte = m_dma_reg[1];
 
-	// RC17/RC20 DMA logic operations ($FED4)
+	// RC17/RC20 DMA logic operations ($FED4) & RC27 reverse source/destination
 	uint8_t op_reg = m_dma_reg[20];
 	uint8_t op = op_reg & 0x07;
 	bool op_not = (op_reg & 0x08) != 0;
+	bool rev_src = (op_reg & 0x10) != 0;
+	bool rev_dst = (op_reg & 0x20) != 0;
 	bool has_logic_op = (op != 0) || op_not;
 
 	auto apply_op = [op, op_not](uint8_t s, uint8_t d) -> uint8_t {
@@ -2821,7 +2829,7 @@ void wildbits_jr2_state::dma_execute()
 				{
 					for (uint32_t i = 0; i < count; i += 2)
 					{
-						uint32_t d_addr = (dst + i) & 0x1ffffe;
+						uint32_t d_addr = rev_dst ? ((dst - i) & 0x1ffffe) : ((dst + i) & 0x1ffffe);
 						if (!mask_even)
 						{
 							uint8_t fb = m_dma_reg[3]; // DMA_FILL_WORD_L (even / low byte)
@@ -2845,7 +2853,7 @@ void wildbits_jr2_state::dma_execute()
 				{
 					for (uint32_t i = 0; i < count; i++)
 					{
-						uint32_t d_addr = (dst + i) & 0x1fffff;
+						uint32_t d_addr = rev_dst ? ((dst - i) & 0x1fffff) : ((dst + i) & 0x1fffff);
 						bool masked = (d_addr & 1) ? mask_odd : mask_even;
 						if (!masked)
 						{
@@ -2869,8 +2877,8 @@ void wildbits_jr2_state::dma_execute()
 				{
 					for (uint32_t i = 0; i < count; i += 2)
 					{
-						uint32_t s_addr = (src + i) & 0x1ffffe;
-						uint32_t d_addr = (dst + i) & 0x1ffffe;
+						uint32_t s_addr = rev_src ? ((src - i) & 0x1ffffe) : ((src + i) & 0x1ffffe);
+						uint32_t d_addr = rev_dst ? ((dst - i) & 0x1ffffe) : ((dst + i) & 0x1ffffe);
 						if (!mask_even)
 						{
 							uint8_t s_val = dma_read_byte(s_addr);
@@ -2894,8 +2902,8 @@ void wildbits_jr2_state::dma_execute()
 				{
 					for (uint32_t i = 0; i < count; i++)
 					{
-						uint32_t s_addr = (src + i) & 0x1fffff;
-						uint32_t d_addr = (dst + i) & 0x1fffff;
+						uint32_t s_addr = rev_src ? ((src - i) & 0x1fffff) : ((src + i) & 0x1fffff);
+						uint32_t d_addr = rev_dst ? ((dst - i) & 0x1fffff) : ((dst + i) & 0x1fffff);
 						bool masked = (d_addr & 1) ? mask_odd : mask_even;
 						if (!masked)
 						{
@@ -2936,7 +2944,7 @@ void wildbits_jr2_state::dma_execute()
 				{
 					if (double_speed)
 					{
-						uint32_t d_addr = (row_dst + x) & 0x1ffffe;
+						uint32_t d_addr = rev_dst ? ((row_dst - x) & 0x1ffffe) : ((row_dst + x) & 0x1ffffe);
 						if (!mask_even)
 						{
 							uint8_t fb = m_dma_reg[3]; // DMA_FILL_WORD_L (even / low byte)
@@ -2956,7 +2964,7 @@ void wildbits_jr2_state::dma_execute()
 					}
 					else
 					{
-						uint32_t d_addr = (row_dst + x) & 0x1fffff;
+						uint32_t d_addr = rev_dst ? ((row_dst - x) & 0x1fffff) : ((row_dst + x) & 0x1fffff);
 						bool masked = (d_addr & 1) ? mask_odd : mask_even;
 						if (!masked)
 						{
@@ -2975,8 +2983,8 @@ void wildbits_jr2_state::dma_execute()
 				{
 					if (double_speed)
 					{
-						uint32_t s_addr = (row_src + x) & 0x1ffffe;
-						uint32_t d_addr = (row_dst + x) & 0x1ffffe;
+						uint32_t s_addr = rev_src ? ((row_src - x) & 0x1ffffe) : ((row_src + x) & 0x1ffffe);
+						uint32_t d_addr = rev_dst ? ((row_dst - x) & 0x1ffffe) : ((row_dst + x) & 0x1ffffe);
 						if (!mask_even)
 						{
 							uint8_t s_val = dma_read_byte(s_addr);
@@ -2996,8 +3004,8 @@ void wildbits_jr2_state::dma_execute()
 					}
 					else
 					{
-						uint32_t s_addr = (row_src + x) & 0x1fffff;
-						uint32_t d_addr = (row_dst + x) & 0x1fffff;
+						uint32_t s_addr = rev_src ? ((row_src - x) & 0x1fffff) : ((row_src + x) & 0x1fffff);
+						uint32_t d_addr = rev_dst ? ((row_dst - x) & 0x1fffff) : ((row_dst + x) & 0x1fffff);
 						bool masked = (d_addr & 1) ? mask_odd : mask_even;
 						if (!masked)
 						{
@@ -3332,8 +3340,8 @@ uint8_t wildbits_jr2_state::sound_fixed_r(offs_t offset)
 		return (uint8_t)(m_pcm_cur_r & 0xff);
 	case 13: // $FF9E: PCM Status (Bit 0: Ready / !busy)
 		return (machine().time() >= m_pcm_ready_time) ? 0x01 : 0x00;
-	case 14: // $FF9F: PCM Spare
-		return 0x00;
+	case 14: // $FF9F: General Instrument SP0250 LPC Speech Synthesizer (RC26/RC27)
+		return 0x80 | (m_speech->drq_r() ? 0x01 : 0x00);
 	default:
 		return 0xff;
 	}
@@ -3406,6 +3414,12 @@ void wildbits_jr2_state::sound_fixed_w(offs_t offset, uint8_t data)
 				m_stream->update();
 			m_pcm_cur_r = (int16_t)(((uint16_t)m_pcm_stage_r << 8) | data);
 			m_pcm_ready_time = machine().time() + attotime::from_nsec(250);
+		}
+		break;
+	case 14: // $FF9F: General Instrument SP0250 LPC Speech Synthesizer (RC26/RC27)
+		if (m_speech->drq_r())
+		{
+			m_speech->write(data);
 		}
 		break;
 	default:
@@ -4721,6 +4735,8 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 			if (vis_x + spr_w <= 0 || vis_x >= bm_w || vis_y + spr_h <= 0 || vis_y >= bm_h)
 				continue;
 
+			uint8_t mirror = m_sprite_mirror[s];
+
 			for (int sy = 0; sy < spr_h; sy++)
 			{
 				int by = vis_y + sy;
@@ -4732,7 +4748,8 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 				if (sy0 > cliprect.max_y || sy1 < cliprect.min_y)
 					continue;
 
-				uint32_t row_addr = start_addr + sy * spr_w;
+				int eff_sy = (mirror & 0x02) ? (spr_h - 1 - sy) : sy;
+				uint32_t row_addr = start_addr + eff_sy * spr_w;
 				if (row_addr + spr_w > 0x200000)
 					continue;
 
@@ -4744,7 +4761,8 @@ uint32_t wildbits_jr2_state::screen_update(screen_device &screen, bitmap_rgb32 &
 					if (bx < 0 || bx >= bm_w)
 						continue;
 
-					uint8_t color_idx = src_row[sx];
+					int eff_sx = (mirror & 0x01) ? (spr_w - 1 - sx) : sx;
+					uint8_t color_idx = src_row[eff_sx];
 					if (color_idx == 0)
 						continue; // Transparent pixel
 
@@ -5503,6 +5521,7 @@ void wildbits_jr2_state::machine_start()
 	save_item(NAME(m_pcm_stage_r));
 	save_item(NAME(m_pcm_cur_l));
 	save_item(NAME(m_pcm_cur_r));
+	save_item(NAME(m_sprite_mirror));
 
 	// Hardware Line-Draw Accelerator taps on CPU address space for Page $FC ($1080 - $10FF)
 	m_maincpu->space(AS_PROGRAM).install_read_tap(0x0000, 0xffff, "wbjr2_ld_r",
@@ -5578,6 +5597,11 @@ void wildbits_jr2_state::machine_start()
 					else
 						data = m_vram_fc[0x1180 + (blk_off & 0x1f)];
 				}
+				else if (blk_off >= 0x1880 && blk_off <= 0x18ff)
+				{
+					// Hardware Sprite Mirror Registers ($1880 - $18FF in Page $FC, RC27)
+					data = m_sprite_mirror[blk_off & 0x7f];
+				}
 			}
 		});
 
@@ -5637,6 +5661,12 @@ void wildbits_jr2_state::machine_start()
 						m_ld_y1 = data;
 						break;
 					}
+				}
+				else if (blk_off >= 0x1880 && blk_off <= 0x18ff)
+				{
+					// Hardware Sprite Mirror Registers ($1880 - $18FF in Page $FC, RC27)
+					m_sprite_mirror[blk_off & 0x7f] = data & 0x03;
+					m_vram_fc[blk_off] = data & 0x03;
 				}
 			}
 		});
@@ -5835,6 +5865,7 @@ void wildbits_jr2_state::machine_reset()
 	// Reset DMA Controller
 	memset(m_dma_reg, 0, sizeof(m_dma_reg));
 	m_dma_status = 0;
+	std::fill(std::begin(m_sprite_mirror), std::end(m_sprite_mirror), 0);
 
 	// Reset Hardware Line-Draw Accelerator
 	m_vky_drawline_ctrl = 0;
@@ -5975,6 +6006,10 @@ void wildbits_jr2_state::wbjr2(machine_config &config)
 
 	MOS6581(config, m_sid_r, XTAL(14'318'181) / 14);
 	m_sid_r->add_route(ALL_OUTPUTS, "rspeaker", 0.50);
+
+	SP0250(config, m_speech, 3'120'000);
+	m_speech->add_route(ALL_OUTPUTS, "lspeaker", 0.50);
+	m_speech->add_route(ALL_OUTPUTS, "rspeaker", 0.50);
 }
 
 struct key_map_entry {
