@@ -64,7 +64,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
     * `$FF`: `COLOR_RAM_BLK` (Text matrix color attribute RAM, 4,800 bytes).
     * Former `$C0–$CF` and `$F0–$FB` undecoded blocks are now **SRAM**!
     * Old `$C4` (Audio), `$C5` (MemText LUTs), and `$C6` (MemText Font) are NO LONGER sectored I/O pages.
-  * **Linear Identity Mapping:** For all SRAM blocks, $\text{Physical Byte Address} = \text{Block} \times \$2000 + \text{Offset}$.
+  * **Linear Identity Mapping:** For all SRAM blocks, `Physical Byte Address = Block × $2000 + Offset`.
   * **Reset Map (`FLASHDIS = 0`):** 156 RAM blocks (1,248 KB) = `$00–$3F` (512 KB) + `$A0–$FB` (736 KB). Blocks `$40–$7F` are Parallel Flash (512 KB), `$80–$9F` are Cartridge Port (256 KB).
   * **Max-RAM Map (`FLASHDIS = 1`, `$FFA1` bit 2):** Blocks `$40–$9F` (768 KB) remap to SRAM (`0x080000–0x13FFFF`), making blocks `$00–$FB` a single contiguous pool of **252 RAM blocks = 2,016 KB (1.96875 MB)**!
   * **VICKYDIS Full 2 MB RAM Map (`VICKYDIS = 1`, `$FFA1` bit 3, RC25):** When set, Blocks `$FC–$FF` (32 KB) remap from TinyVicky device pages to physical SRAM (`0x1F8000–0x1FFFFF`), making all **256 blocks = 2,048 KB (2.0 MB)** of physical SRAM directly accessible to the CPU. The TinyVicky display rasterizer and DMA engine continue accessing video memory directly, unaffected by `VICKYDIS`. Bit 6 of `$FFA1` (`VICKYDIS.OK`) reads as `1` on RC25 cores.
@@ -94,7 +94,7 @@ The **Wildbits Jr2** (formerly known as the **Foenix F256 Jr2** / **JrJr**) is a
   * Triple **MOS 6581 / 8580** Sound Interface Devices (SIDs) (accessible via indirect fixed I/O at `$FF98–$FF99`; 9 synth voices with multi-mode analog filters). Driven by a 1,022,727 Hz clock enable. (RC26 adds 2-stage capture resynchronization `SID_L/R_Cap0/1` before summing to eliminate click noise).
   * **WM8776** Audio CODEC and 24-bit DAC at `$FE70-$FE72` for master mixing, equalization, and volume control (InitCODEC selects all 5 analog inputs via R21 = `$1F` / `$2A1F`, routing VS1053 outputs on AIN3..5; calibrated independently for Jr2 vs. K2 via `play`).
   * **VS1053b** Hardware MP3 / Audio Stream Decoder at `$FF50–$FF57`, clocked at **12.288 MHz** (24.576 MHz ÷ 2, within 12–13 MHz boot spec), equipped with a 2,048-byte SDI stream FIFO at `$FF57`, 16 SCI registers at `$FF50–$FF53`, dual-speed SPI (1.57 MHz default, 6.29 MHz fast), fixed register offset decoding, and hardware DREQ flow control.
-  * **SAM2695** General MIDI hardware synthesizer interface with **Edition 2 Control Register** across 10 bytes at `$FF30-$FF39` (`MIDI_CTRL` at `$FF30`, `MIDI_DATA` at `$FF31`, and 11-bit Rx/Tx FIFO read/write counters at `$FF32–$FF39`) featuring Tx/Rx FIFO-empty flags, hardware FIFO reset, **1152-tick mid-bit sample timing** (31,250 baud on 24 MHz clock: $768 \times 1.5 = 1152$), and a **127-CPU-clock active-low per-byte receive interrupt pulse (`MIDI_Rx_IRQn_o`)** on byte arrival at `$FF31` (Longview_rc24+). (RC26 adds `CPU_Data_Valid_i` gating for `$FF31` reads).
+  * **SAM2695** General MIDI hardware synthesizer interface with **Edition 2 Control Register** across 10 bytes at `$FF30-$FF39` (`MIDI_CTRL` at `$FF30`, `MIDI_DATA` at `$FF31`, and 11-bit Rx/Tx FIFO read/write counters at `$FF32–$FF39`) featuring Tx/Rx FIFO-empty flags, hardware FIFO reset, **1152-tick mid-bit sample timing** (31,250 baud on 24 MHz clock: 768 × 1.5 = 1152), and a **127-CPU-clock active-low per-byte receive interrupt pulse (`MIDI_Rx_IRQn_o`)** on byte arrival at `$FF31` (Longview_rc24+). (RC26 adds `CPU_Data_Valid_i` gating for `$FF31` reads).
   * Hardware System Buzzer on `SYS0` (`$FE00` bit 4).
 * **Storage & Peripheral Interfaces:**
   * Dual SPI SD Card controllers (SD, SDHC, SDXC). Port 0 (`$FE90–$FE91`, external Main SD slot on top of PCB), Port 1 (`$FF00–$FF01`, internal Micro-SD slot on bottom of PCB).
@@ -206,7 +206,7 @@ Inspection of the release packages and commit history establishes the progressio
   * **Debug Module Frame Wrap Toggle (`Dbg_Frame_Tgl_o`):** Prevents debug entry hangs under `LONGVIEW_MEMFAST`.
 * **Longview_rc24 Hardware Architecture (2026-10-09):**
   * **Sectored I/O Relocation to `$FC–$FF`:** Sectored I/O pages relocated from `$C0–$C3` to `$FC–$FF` (`MMU_Entry[7:2] == 6'b111111`). `$FC` = VICKY registers, CLUTs, LineDraw, and Sprites; `$FD` = Fonts and Graphics CLUTs; `$FE` = Text RAM; `$FF` = Color RAM. Blocks `$C0–$CF` and `$F0–$FB` become ordinary SRAM.
-  * **2,016 KB Contiguous SRAM Pool:** In `FLASHDIS = 1` mode, Blocks `$00–$FB` form a continuous 252-block SRAM pool (2,016 KB) with linear identity mapping ($\text{Address} = \text{Block} \times \$2000 + \text{Offset}$). Reset mode (`FLASHDIS = 0`) provides 1,248 KB SRAM (156 blocks = `$00–$3F` + `$A0–$FB`).
+  * **2,016 KB Contiguous SRAM Pool:** In `FLASHDIS = 1` mode, Blocks `$00–$FB` form a continuous 252-block SRAM pool (2,016 KB) with linear identity mapping (`Address = Block × $2000 + Offset`). Reset mode (`FLASHDIS = 0`) provides 1,248 KB SRAM (156 blocks = `$00–$3F` + `$A0–$FB`).
   * **`LONGVIEW_MEMFAST` Adaptive CPU Scheduler:** Coast cycles run at 25.0 MHz (8 ticks). Turbo RAM reads run at 20.0 MHz (10 ticks), writes at 14.28 MHz (14 ticks). Internal fast decodes run at 12.50 MHz (16 ticks). Peripherals run at 6.29 MHz (32 ticks). Stock mode provides 16.67 MHz reads and 12.50 MHz writes.
   * **Bresenham Line Drawer `HoldLine` CPU Arbitration:** Asserts `HoldLine` to the CPU scheduler at frame boundaries up to 16 burst + 2 guard ticks while writing pixels, eliminating dropped vectors without DMA collisions.
   * **Readable Tilemap Registers:** Tilemap control registers `$1100–$113F` and tileset registers `$1180–$119F` in Page `$FC` are fully CPU-readable.
@@ -243,15 +243,15 @@ The 21-bit physical address bus maps the following resources in the Longview arc
 | `0x0F0000 - 0x0F9FFF` | 40 KB  | Blocks `$78 - $7C` | **Flash (`/f0`) / SRAM** | FEU read-only RBF system volume in normal mode; remapped to SRAM when `FLASHDIS = 1`. |
 | `0x0FA000 - 0x0FFFFF` | 24 KB  | Blocks `$7D - $7F` | **Flash (Booter) / SRAM**| Power-on booter (`booter_0..2`) in normal mode; remapped to SRAM when `FLASHDIS = 1`. |
 | `0x100000 - 0x13FFFF` | 256 KB | Blocks `$80 - $9F` | **Cartridge Port / SRAM** | Dual external Flash cartridges (`/c0` @ `$80`, `/c1` @ `$90`) in normal mode; remapped to SRAM when `FLASHDIS = 1`. |
-| `0x140000 - 0x1F7FFF` | 736 KB | Blocks `$A0 - $FB` | **System SRAM** | High-speed contiguous SRAM (92 blocks; linear identity address $\text{Block} \times \$2000$). Former Windows A/B and undecoded blocks are now SRAM. |
-| `0x1F8000 - 0x1FFFFF` | 32 KB  | Blocks `$FC - $FF` | **Sectored I/O / SRAM** | Relocated TinyVicky registers, CLUTs, font banks, text matrix, and color attribute RAM in normal mode (`VICKYDIS = 0`); remapped to contiguous physical SRAM at $\text{Block} \times \$2000$ (`0x1F8000–0x1FFFFF`) when `VICKYDIS = 1` (`$FFA1` bit 3, RC25). |
+| `0x140000 - 0x1F7FFF` | 736 KB | Blocks `$A0 - $FB` | **System SRAM** | High-speed contiguous SRAM (92 blocks; linear identity address `Block × $2000`). Former Windows A/B and undecoded blocks are now SRAM. |
+| `0x1F8000 - 0x1FFFFF` | 32 KB  | Blocks `$FC - $FF` | **Sectored I/O / SRAM** | Relocated TinyVicky registers, CLUTs, font banks, text matrix, and color attribute RAM in normal mode (`VICKYDIS = 0`); remapped to contiguous physical SRAM at `Block × $2000` (`0x1F8000–0x1FFFFF`) when `VICKYDIS = 1` (`$FFA1` bit 3, RC25). |
 
 > [!NOTE]
 > **Flash Visibility Constraint:** Although the physical SST39VF flash chip is 2 MB, only **512 KB** is visible to the 6809 MMU: the FPGA drives 19 address bits (6 block bits + 13 offset bits), and lines A19/A20 do not leave the FPGA.
 > **Cartridge Port vs. Expansion SRAM:** On the Wildbits Jr2, Blocks `$80–$9F` route directly to the external cartridge connector, enabling hot-pluggable SST39-compatible flash cartridges (`/c0` and `/c1`). On the companion K2, this same physical decode routes instead to internal expansion SRAM.
 > **2,016 KB Contiguous SRAM Decoding (Longview Max-RAM Mode):** The onboard SRAM chip is 1M × 16 (2 MB). In standard/reset mode (`FLASHDIS = 0`), 156 RAM blocks (1,248 KB) are mapped (`$00–$3F` 512 KB + `$A0–$FB` 736 KB). When FLASHDIS mode is enabled (`$FFA1` bit 2 = 1), Blocks `$40–$9F` (96 blocks = 768 KB) are remapped from Flash/Cartridge to physical SRAM at chip addresses `0x080000 - 0x13FFFF`, yielding **2,016 KB (252 blocks = 1.96875 MB)** of contiguous SRAM for NitrOS-9!
-> **2,048 KB (2.0 MB) Full-SRAM Mode with VICKYDIS (`$FFA1[3]`, RC25):** Setting `VICKYDIS = 1` (`$FFA1` bit 3) further reclaims Blocks `$FC–$FF` (32 KB) as physical SRAM at `0x1F8000–0x1FFFFF` ($\text{Block} \times \$2000$), allowing CPU access to the entire 2 MB physical SRAM space across all 256 blocks (`$00–$FF`). The TinyVicky video rasterizer and DMA engine bypass the MMU and continue accessing video memory uninterrupted. When `VICKYDIS` is cleared back to 0, TinyVicky device pages return with their register and text/attribute contents fully intact.
-> **Linear Identity Addressing:** For all SRAM blocks, $\text{Physical Byte Address} = \text{Block} \times \$2000 + \text{Offset}$, with zero offset anomalies across CPU, VICKY, DMA, and debug port alike.
+> **2,048 KB (2.0 MB) Full-SRAM Mode with VICKYDIS (`$FFA1[3]`, RC25):** Setting `VICKYDIS = 1` (`$FFA1` bit 3) further reclaims Blocks `$FC–$FF` (32 KB) as physical SRAM at `0x1F8000–0x1FFFFF` (`Block × $2000`), allowing CPU access to the entire 2 MB physical SRAM space across all 256 blocks (`$00–$FF`). The TinyVicky video rasterizer and DMA engine bypass the MMU and continue accessing video memory uninterrupted. When `VICKYDIS` is cleared back to 0, TinyVicky device pages return with their register and text/attribute contents fully intact.
+> **Linear Identity Addressing:** For all SRAM blocks, `Physical Byte Address = Block × $2000 + Offset`, with zero offset anomalies across CPU, VICKY, DMA, and debug port alike.
 > **Audio Subsystem in Longview:** Because Block `$C4` is now ordinary SRAM, all audio synthesizers (OPL3, PSG, SID), Dual 16-Bit Stereo PCM, and General Instrument SP0250 LPC speech MUST be accessed via the consolidated fixed I/O registers at **`$FF91–$FF9F`**.
 
 #### Dedicated Sectored I/O Blocks (`$FC–$FF`):
@@ -267,7 +267,7 @@ The 21-bit physical address bus maps the following resources in the Longview arc
   * `$1200 - $121F`: `CS_VICKY_MEMTXT_REG` — MemText hardware text engine control registers (`MEMTEXT_REG[0:31]`).
   * `$1300 - $16FF`: **128 Hardware Sprite Attribute Records** (8 bytes each, Big-Endian).
   * `$1700 - $177F`: Text Mode Palettes (Foreground CLUT at `$1700`, Background CLUT at `$1740`; fully shadowed and **readable by CPU**).
-  * `$1880 - $18FF`: **128 Hardware Sprite H/V Mirror Registers (RC27):** 128 bytes (`CS_SPRITE_MIRROR`), one byte per sprite at `$1880 + n` ($n = 0..127$). Bit 0 = Horizontal flip (`H_MIRROR`), Bit 1 = Vertical flip (`V_MIRROR`). Bits 2..7 read as 0. Cleared to `$00` on reset. (Note: On K2 this range overlaps with GPU/SceneEngine registers, but on Jr2 GPU/SceneEngine is omitted and `$1880–$18FF` belongs exclusively to `CS_SPRITE_MIRROR`).
+  * `$1880 - $18FF`: **128 Hardware Sprite H/V Mirror Registers (RC27):** 128 bytes (`CS_SPRITE_MIRROR`), one byte per sprite at `$1880 + n` (`n = 0..127`). Bit 0 = Horizontal flip (`H_MIRROR`), Bit 1 = Vertical flip (`V_MIRROR`). Bits 2..7 read as 0. Cleared to `$00` on reset. (Note: On K2 this range overlaps with GPU/SceneEngine registers, but on Jr2 GPU/SceneEngine is omitted and `$1880–$18FF` belongs exclusively to `CS_SPRITE_MIRROR`).
 * **Block `$FD` (`0x1FA000`):** `FONT_BLK` & `GRAPH_LUT_BLK` (active when `VICKYDIS = 0`):
   * `$0000 - $0FFF`: Dual 2 KB font banks (Font Set 0 at `$0000-$07FF`, Font Set 1 at `$0800-$0FFF`). Pre-initialized with OS-9 Bannerfont.
   * `$1000 - $1FFF`: **4 Graphics CLUTs** (LUT0–3, 256 colors × 4 bytes `[Blue, Green, Red, Alpha]`).
@@ -439,7 +439,7 @@ The following register map details every active hardware device decoded in the f
 | **`$FF00 - $FF01`** | `SDC1` (R/W) | **Internal SPI SD Card Port 1 (Micro-SD Slot, Bottom of PCB):**<br>• `$FF00`: Status/Control (`[7:SPI_BUSY, 1:SPI_CLK, 0:CS_EN]`)<br>• `$FF01`: `SPI_DATA` (shifts byte in/out) |
 | **`$FF10 - $FF18`** | `FL_DMA` (R/W) | **Splash / SPI Flash DMA Controller:**<br>• `$FF10`: Control (R: `[7:BUSY, 6:FIFO_EMPTY]`)<br>• `$FF11`: Flash Command Byte<br>• `$FF12-$FF13`: Receive FIFO Byte Count (12-bit)<br>• `$FF14-$FF16`: Flash 24-bit Source Address<br>• `$FF17`: Transfer Size / Control<br>• `$FF18`: FIFO Data Port (pops byte) |
 | **`$FF20 - $FF2A`** | `WIZFI` (R/W) | **WizFi360 Modern Hardware FIFO Bridge (`defs/wildbits.d`, rc24):**<br>• `$FF20`: `WizFi_CtrlReg` (`[7:TxEmpty (R), 6:RxEmpty (R), 4..0:Baud Rate Code 0..16 (reset 10 = 115,200 baud)]`)<br>• `$FF21`: `WizFi_ResetReg` (`[7:HasReset (reads 1), 2:UartRst, 1:FifoRst, 0:ChipRst]`). *Note: On Jr2, Bit 0 also drives pin T14, asserting `SAM2695_RSTn_o` to reset the MIDI synth!*<br>• `$FF22`: `WizFi_DataReg` (TX push / RX pop, moved from `$FF21` in modern layout)<br>• `$FF23-$FF24`: `RxD_RD_Cnt` (11-bit Big-Endian, `$FF23` = high 3 bits, `$FF24` = low 8 bits)<br>• `$FF25-$FF26`: `RxD_WR_Cnt` (11-bit Big-Endian Available RX Bytes)<br>• `$FF27-$FF28`: `TxD_RD_Cnt` (11-bit Big-Endian)<br>• `$FF29-$FF2A`: `TxD_WR_Cnt` (11-bit Big-Endian)<br>• Supports **WizCon4** (4 independent concurrent packet-mode incoming telnet shells).<br>• SNTP Support: `AT+CIPSNTPCFG` and `AT+CIPSNTPTIME` response emulation providing formatted host local date and time. |
-| **`$FF30 - $FF39`** | `SAM2695` (R/W)| **SAM2695 MIDI Synth Interface (Edition 2, 10 Registers):**<br>• `$FF30` Read: `[3:Tx_empty, 2:Rx_empty]`; Write: `[1:FIFO_Reset]` (write 1, then write 0 to release)<br>• `$FF31`: `MIDI_DATA` Rx/Tx FIFO Data Port (writes also reach SAM2695 synth). In Longview_rc24+, byte arrival asserts a 127-CPU-clock active-low pulse on `MIDI_Rx_IRQn_o` (Group 3 bit 1 IRQ).<br>• `$FF32-$FF33`: `MIDI_RXD_RD_CNT` (11-bit valid Rx read count, Big-Endian)<br>• `$FF34-$FF35`: `MIDI_RXD_WR_CNT` (11-bit valid Rx write count, Big-Endian)<br>• `$FF36-$FF37`: `MIDI_TXD_RD_CNT` (11-bit valid Tx read count, Big-Endian)<br>• `$FF38-$FF39`: `MIDI_TXD_WR_CNT` (11-bit valid Tx write count, Big-Endian)<br>• *Timing:* `Serial_MIDI_Rx.v` mid-bit sample wait updated to 1152 clocks (31,250 baud on 24 MHz clock: $768 \times 1.5 = 1152$), bit interval 764 clocks. |
+| **`$FF30 - $FF39`** | `SAM2695` (R/W)| **SAM2695 MIDI Synth Interface (Edition 2, 10 Registers):**<br>• `$FF30` Read: `[3:Tx_empty, 2:Rx_empty]`; Write: `[1:FIFO_Reset]` (write 1, then write 0 to release)<br>• `$FF31`: `MIDI_DATA` Rx/Tx FIFO Data Port (writes also reach SAM2695 synth). In Longview_rc24+, byte arrival asserts a 127-CPU-clock active-low pulse on `MIDI_Rx_IRQn_o` (Group 3 bit 1 IRQ).<br>• `$FF32-$FF33`: `MIDI_RXD_RD_CNT` (11-bit valid Rx read count, Big-Endian)<br>• `$FF34-$FF35`: `MIDI_RXD_WR_CNT` (11-bit valid Rx write count, Big-Endian)<br>• `$FF36-$FF37`: `MIDI_TXD_RD_CNT` (11-bit valid Tx read count, Big-Endian)<br>• `$FF38-$FF39`: `MIDI_TXD_WR_CNT` (11-bit valid Tx write count, Big-Endian)<br>• *Timing:* `Serial_MIDI_Rx.v` mid-bit sample wait updated to 1152 clocks (31,250 baud on 24 MHz clock: 768 × 1.5 = 1152), bit interval 764 clocks. |
 | **`$FF40 - $FF48`** | `W6100` (Unwired) | **W6100 Ethernet Adapter Decode (K2 Only):**<br>Decodes W6100 adapter interface in common RTL, but unwired on Jr2 (no physical pins or PHY). Reads return open-bus float (`$FF`); writes ignored. (Yamaha OPL3 FM synthesis is located exclusively at fixed I/O `$FF94–$FF97`). |
 | **`$FF50 - $FF57`** | `VS1053` (R/W) | **VS1053b Hardware MP3 / Audio Stream Decoder (Clocked at 12.288 MHz; Fixed Offset Decode):**<br>• `$FF50`: `VS_CTRL` (`[7:BUSY (R), 3:RESET (W: drives XRESET low, flushes FIFO), 2:FAST_SPI (W: 1=6.29 MHz, 0=1.57 MHz), 1:READ (W: 1=read, 0=write), 0:START (W: 0→1 edge)]`)<br>• `$FF51`: `VS_SCI_SEL` (SCI Register Select 0..F: MODE, STATUS, BASS, CLOCKF, DECODE_TIME, AUDATA, etc.)<br>• `$FF52-$FF53`: `VS_SCI_DATA_H/L` (16-bit register value write/read, big-endian)<br>• `$FF54`: `VS_SDI_STAT` (R: `[7:EMPTY, 6:FULL, 2..0:COUNT_10..8]`; reading `$FF54` snapshots the 11-bit count for `$FF55`)<br>• `$FF55`: `VS_SDI_COUNT` (R: Count bits 7..0)<br>• `$FF56`: Reserved (`$00`)<br>• `$FF57`: `VS_SDI_DATA` (W: pushes byte to 2,048-byte hardware stream FIFO)<br>• `$FF58-$FF5F`: Read mirror of `$FF50-$FF57` (hardware DREQ flow control) |
 | **`$FF60 - $FF6F`** | `I2C` (Unwired) | **I2C Master Controller Decode (K2 Only):**<br>Used on K2 for SiI9022 HDMI transmitter setup and Ethernet MAC EEPROM. Unwired and unmapped on Jr2 (reads return open-bus float `$FF`; writes ignored). The Jr2 incorporates an internal FPGA TMDS video encoder (`iHDMI_*`) requiring no external I2C configuration. |
@@ -671,7 +671,7 @@ Sprite coordinates operate in a **32-pixel offset border space** allowing sprite
 Introduced in the **`Longview_rc27`** core, TinyVicky II incorporates hardware horizontal and vertical sprite mirroring. Each of the 128 hardware sprites has a dedicated 1-byte control register in a dedicated 128-byte register bank:
 
 * **Register Address Map:** Located in VICKY Page `$FC` at offsets `$1880–$18FF`:
-  * Sprite $n$ Mirror Register ($n = 0..127$): Offset `$1880 + n`.
+  * Sprite `n` Mirror Register (`n = 0..127`): Offset `$1880 + n`.
   * When Page `$FC` is mapped into CPU Slot 2 (`$FFAA = $FC`), registers reside at `$5880–$58FF`.
   * When Page `$FC` is mapped into CPU Slot 7 (`$FFAF = $FC`), registers reside at `$F880–$F8FF`.
 * **Register Bitfields:**
@@ -683,16 +683,24 @@ Introduced in the **`Longview_rc27`** core, TinyVicky II incorporates hardware h
 * **Hardware RTL Implementation (`Sprite_State_Machine.v`):**
   * **Vertical Flip Pipeline:**
     * In `Sprite_State_Machine.v`, when `V_MIRROR` (`Sprite_Mirror_i[1]`) is active, the line-in-sprite offset calculation is inverted:
-      $$\text{Line\_Number\_In\_Sprite\_Reg} \Leftarrow Y_1 - 1 - \text{Horizontal\_Line\_Count\_Div}$$
-      where $Y_1 = Y_0 + \text{Line\_Size}$. The sprite state machine fetches scanline rows starting at the bottom row ($\text{Line\_Size} - 1$) and stepping up to row 0.
+      ```verilog
+      Line_Number_In_Sprite_Reg <= Y1 - 1 - Horizontal_Line_Count_Div;
+      ```
+      where `Y1 = Y0 + Line_Size`. The sprite state machine fetches scanline rows starting at the bottom row (`Line_Size - 1`) and stepping up to row 0.
   * **Horizontal Flip Pipeline:**
     * When `H_MIRROR` (`Sprite_Mirror_i[0]`) is active, the engine latches `Sprite_HMirror <= 1'b1` during state `SP_STATE1`.
     * Initial line buffer scan address begins at the rightmost pixel pair rather than the left edge:
-      $$\text{LayerScanAddress\_SP} \Leftarrow \text{Sprite\_X\_Position}[8:0] + 62 + \text{Line\_Size}[8:0]$$
+      ```verilog
+      LayerScanAddress_SP <= Sprite_X_Position[8:0] + 62 + Line_Size[8:0];
+      ```
     * As each 16-bit word is received from VRAM, the buffer write pointer decrements by 2 instead of incrementing:
-      $$\text{LayerScanAddress\_SP} \Leftarrow \text{LayerScanAddress\_SP} - 9\text{d}2$$
+      ```verilog
+      LayerScanAddress_SP <= LayerScanAddress_SP - 9'd2;
+      ```
     * In `Sprite_Data_Reg`, the two 8-bit pixels within each 16-bit fetched VRAM word are swapped:
-      $$\text{Sprite\_Data\_Reg} \Leftarrow \{\text{VRAM\_Data}[7:0], \text{VRAM\_Data}[15:8]\}$$
+      ```verilog
+      Sprite_Data_Reg <= {VRAM_Data[7:0], VRAM_Data[15:8]};
+      ```
     * This combination of starting at the right edge, decrementing by 2 across the line, and swapping pixel byte lanes achieves an exact pixel-by-pixel horizontal reflection.
   * **Simultaneous H+V Mirroring (`$03`):** Both horizontal and vertical flips can be active simultaneously, resulting in a true 180-degree rotation of the sprite graphics.
 * **Software Verification:** Verified by the dedicated NitrOS-9 utility `/CMDS/spritemirror` (shipped in RC27 `wildbitsjr2_future.dsk`), which tests register readback across normal, H, V, and H+V modes and verifies visual equivalence against reference rendering.
@@ -782,8 +790,8 @@ Residing in sectored I/O Page `$FC` at offsets `$1080–$1087`, TinyVicky II inc
 
 * **Coordinate Validation & Clipping Limits:**
   * Coordinates are strictly validated against screen dimensions before line execution:
-    * Standard Mode: `X0`, `X1` must be $< 320$, `Y0`, `Y1` must be $< 240$.
-    * HIRES4 Mode: `X0`, `X1` must be $< 640$, `Y0`, `Y1` must be $< 240$.
+    * Standard Mode: `X0`, `X1` must be < 320, `Y0`, `Y1` must be < 240.
+    * HIRES4 Mode: `X0`, `X1` must be < 640, `Y0`, `Y1` must be < 240.
   * If any endpoint coordinate equals or exceeds these bounds (`!valid_coords`), the line draw trigger is completely ignored: the engine stays in `IDLE`, and `DONE` never asserts.
 
 * **HIRES4 640 × 240 16-Color Line Drawing Architecture:**
@@ -1567,7 +1575,7 @@ The Wildbits Jr2 incorporates an integer math accelerator inside the Artix-7 FPG
   * **Quotient (`QUOU_RES`):** `$FEF4` (High byte), `$FEF5` (Low byte), mapped to `m_axis_dout_tdata[31:16]`.
   * **Remainder (`REMU_RES`):** `$FEF6` (High byte), `$FEF7` (Low byte), mapped to `m_axis_dout_tdata[15:0]`.
   * **Hardware Divider Latency & Pipeline:** Implemented using a non-blocking Radix-2 divider IP core (`Div_Unsigned_16_16`) clocked at `CPU_Clk_i`. The core has a fixed pipeline latency of **12 clock cycles** (`C_LATENCY = 12`). Because 6809 instructions require multiple clock cycles (a single `STD` takes 5–8 cycles, and the subsequent `LDD` takes 5 cycles), the 12-cycle division pipeline is fully settled and valid by the time software reads the result registers.
-  * **The RC14 Remainder Slicing Correction:** In cores prior to rc14, `Unsigned_Div_Remain_Out` was erroneously wired as `{[15:8], [8:0]}` (17 bits into a 16-bit bus). This truncated bit 15 and duplicated bit 8 into bit 7, causing remainders $\ge 256$ to read roughly doubled (proven by `tests/math.asm`). Starting in `v8_rc14`, `JR_Math_Block.v` reads clean `{tdata[15:8], tdata[7:0]}`, providing exact 16-bit remainders.
+  * **The RC14 Remainder Slicing Correction:** In cores prior to rc14, `Unsigned_Div_Remain_Out` was erroneously wired as `{[15:8], [8:0]}` (17 bits into a 16-bit bus). This truncated bit 15 and duplicated bit 8 into bit 7, causing remainders ≥ 256 to read roughly doubled (proven by `tests/math.asm`). Starting in `v8_rc14`, `JR_Math_Block.v` reads clean `{tdata[15:8], tdata[7:0]}`, providing exact 16-bit remainders.
   * **Divide-by-Zero Guard:** When denominator = 0, hardware and emulation return saturated quotient (`$FFFF`) and remainder = numerator with zero host exceptions.
 * **`$FEE8-$FEEF` → `$FEF8-$FEFB` (Unsigned 32-bit Addition):**
   * `ADD_A` (`$FEE8-$FEEB`) + `ADD_B` (`$FEEC-$FEEF`) → `ADD_RES` (`$FEF8-$FEFB`) with carry propagation.
@@ -1713,8 +1721,8 @@ The internal synthesizer models are integrated directly within the Artix-7 FPGA:
   * `$FF36-$FF37` (`MIDI_TXD_RD_CNT`): 16-bit / 11-bit valid Tx FIFO read count (high byte first).
   * `$FF38-$FF39` (`MIDI_TXD_WR_CNT`): 16-bit / 11-bit valid Tx FIFO write count (high byte first). Queued Tx bytes = `WR_CNT - RD_CNT`.
 * **31,250 Baud Bit Timing (`Serial_MIDI_Rx.v`):**
-  * Mid-bit sampling alignment: `First_Wait` countdown from start bit falling edge is set to **1152** clocks ($768 \times 1.5 = 1152$ on 24.0 MHz serial clock).
-  * Inter-bit interval is set to **764** clocks ($768 - 4$), providing rock-solid 0.0% frequency drift.
+  * Mid-bit sampling alignment: `First_Wait` countdown from start bit falling edge is set to **1152** clocks (768 × 1.5 = 1152 on 24.0 MHz serial clock).
+  * Inter-bit interval is set to **764** clocks (768 - 4), providing rock-solid 0.0% frequency drift.
 * **Edition 3 Per-Byte Receive Interrupt (`F256K2_MIDI_Interface.v`):**
   * Hardware asserts `MIDI_Rx_IRQn_o` as an active-low pulse lasting **127 CPU clocks** upon arrival of each received byte once visible on the read side of the FIFO (`Rx_Byte_Pending && !Rx_empty`).
   * Routed across clock domains via `NEW_Rx_FIFO_MIDI_Sync` to **Interrupt Group 3, bit 1** (`INT_MIDI_RX` at `$FE23`).
@@ -1759,8 +1767,7 @@ The internal synthesizer models are integrated directly within the Artix-7 FPGA:
 * **Interrupt Routing:** In `source/Jr2 Code/TinyVKY2_IO_Page0_Devices.v:2088`, input `.MIDI_VS_Rx_IRQn_i( 1'b1 )` is permanently tied high (inactive). Group 3 bit 4 (`INT_MIDI_VS_RX`) never asserts on Wildbits Jr2 hardware; VS1053b streaming drivers rely strictly on hardware status polling (`$FF50` BUSY, `$FF54` SDI FIFO count/status).
 * **MAME Emulation & Fixed-Rate Resampling Architecture:**
   * In `src/mame/wildbits/wildbits_jr2.cpp`, the driver allocates a fixed 44,100 Hz sound stream (`stream_alloc(0, 2, 44100)`).
-  * Rather than calling `m_stream->set_sample_rate(m_current_hz)` upon decoding audio at alternate rates (such as 8 kHz, 11.025 kHz, 22.05 kHz, or 48 kHz)—which previously caused heap memory corruption in MAME (`free(): invalid next size`)—the decoded audio at `m_current_hz` is resampled to the fixed 44.1 kHz stream rate using linear interpolation:
-    $$\text{step} = \frac{m\_current\_hz}{\text{stream.sample\_rate()}}$$
+  * Rather than calling `m_stream->set_sample_rate(m_current_hz)` upon decoding audio at alternate rates (such as 8 kHz, 11.025 kHz, 22.05 kHz, or 48 kHz)—which previously caused heap memory corruption in MAME (`free(): invalid next size`)—the decoded audio at `m_current_hz` is resampled to the fixed 44.1 kHz stream rate using linear interpolation (`step = m_current_hz / stream.sample_rate()`):
     ```cpp
     const double step = double(m_current_hz) / double(stream.sample_rate());
     for (int s = 0; s < stream.samples(); s++) {
@@ -1846,26 +1853,29 @@ Starting in **`wildbits_jr2_6809_Longview_rc26`** and finalized in **`rc27`** (c
 * **Clocking & Timing Architecture:**
   * **Audio Domain Clocking (`aclk` = 24.576 MHz):** The SP0250 core operates entirely in the 24.576 MHz audio clock domain.
   * **3.12 MHz Clock Enable (`ce`):** Generated from `aclk` using a 16-bit phase accumulator:
-    $$\text{acc}_{\text{next}} = \text{acc} + 3120$$
-    When $\text{acc}_{\text{next}} \ge 24576$, the accumulator subtracts 24576 and asserts clock enable `ce = 1`. This yields an average clock frequency of exactly $24.576 \times \frac{3120}{24576} = 3.120\text{ MHz}$.
-  * **10 kHz Sample Generation Rate:** The SP0250 produces one audio sample every $4 \times 39 = 156$ internal ROMCLOCK cycles (312 master clock enables). At 3.12 MHz, this corresponds to an output sample rate of:
-    $$\frac{3,120,000}{312} = 10,000\text{ Hz}\quad(10\text{ kHz})$$
+    ```verilog
+    acc_next = acc + 3120;
+    ```
+    When `acc_next >= 24576`, the accumulator subtracts 24576 and asserts clock enable `ce = 1`. This yields an average clock frequency of exactly 24.576 × (3120 / 24576) = 3.120 MHz.
+  * **10 kHz Sample Generation Rate:** The SP0250 produces one audio sample every 4 × 39 = 156 internal ROMCLOCK cycles (312 master clock enables). At 3.12 MHz, this corresponds to an output sample rate of 3,120,000 / 312 = 10,000 Hz (10 kHz).
 
 * **Synthesis Engine & LPC Frame Protocol:**
   * **15-Byte LPC Frame FIFO:** Software pushes 15 bytes per frame:
-    * Six lattice filter reflection coefficients ($k_1$ through $k_6$).
-    * Excitation pitch ($p$).
-    * Amplitude scaling factor ($a$).
-    * Frame repeat count ($r$).
+    * Six lattice filter reflection coefficients (`k1` through `k6`).
+    * Excitation pitch (`p`).
+    * Amplitude scaling factor (`a`).
+    * Frame repeat count (`r`).
   * When the 15-byte FIFO is full and the active frame's repeat count expires, the FIFO unpacks the new parameters and asserts `drq` requesting the next frame.
   * **Lattice Filter Arithmetic:** Sequential evaluation of the six filter stages occurs over 6 audio clocks within each 10 kHz sample period. Lattice arithmetic wraps at 16 bits without saturation clamping, preserving the exact authentic timbre of arcade classics (e.g. *Space Fury*, *Zektor*, *Star Trek*).
-  * **8-Bit Signed DAC Output:** The SP0250 core produces an 8-bit signed DAC output in the range $-64$ to $+63$.
+  * **8-Bit Signed DAC Output:** The SP0250 core produces an 8-bit signed DAC output in the range -64 to +63.
 
 * **PCM Channel Mixing & Saturation:**
-  * In `WildbitsSpeech`, the 8-bit signed DAC output is scaled by 256 into a 16-bit signed signal (`speech <= {dac, 8'h00}`, spanning $-16,384$ to $+16,128$).
+  * In `WildbitsSpeech`, the 8-bit signed DAC output is scaled by 256 into a 16-bit signed signal (`speech <= {dac, 8'h00}`, spanning -16,384 to +16,128).
   * In `WildbitsSoundDecode`, this signed 16-bit speech term is summed symmetrically into both the Left and Right PCM audio channels in the `aclk` domain:
-    $$\text{sum}_L = \text{pcm}_L + \text{speech}$$
-    $$\text{sum}_R = \text{pcm}_R + \text{speech}$$
+    ```verilog
+    sum_L = pcm_L + speech;
+    sum_R = pcm_R + speech;
+    ```
   * The summed channels are saturation-clamped to 16-bit signed range (clamped to `+32767` / `$7FFF` on positive overflow, `-32768` / `$8000` on negative overflow).
   * The resulting saturated Left and Right PCM streams (`mix_l` / `mix_r`) drive `pcm_left` and `pcm_right` directly into the 19-bit master summation mixer in `source/sound/audio_out/audio_out.v`.
 
@@ -1906,12 +1916,12 @@ The FPGA implements a high-speed hardware DMA engine capable of executing linear
 * **`$FED2 - $FED3` (`DMA_DST_STRIDE_H/L`):** 16-bit destination row stride (bytes added to destination pointer at the end of each row in 2D mode).
 * **`$FED4` (`DMA_OP_REG`, rc20 / rc18+):** Hardware DMA Logic Operations register:
   * Bits 2:0 (`DMA_OP`): Operation select:
-    * `0` = `DMA_OP_COPY`: Plain memory copy ($S \to D$).
-    * `1` = `DMA_OP_OR`: Bitwise OR ($S \lor D$).
-    * `2` = `DMA_OP_AND`: Bitwise AND ($S \land D$).
-    * `3` = `DMA_OP_XOR`: Bitwise XOR ($S \oplus D$).
+    * `0` = `DMA_OP_COPY`: Plain memory copy (`S -> D`).
+    * `1` = `DMA_OP_OR`: Bitwise OR (`S | D`).
+    * `2` = `DMA_OP_AND`: Bitwise AND (`S & D`).
+    * `3` = `DMA_OP_XOR`: Bitwise XOR (`S ^ D`).
     * `4` = `DMA_OP_MASK`: Per-nibble transparency mask. Operates on 16-bit VRAM data (or 8-bit bytes) across 4-bit nibbles: `(Op_Src[nibble] != 0) ? Op_Src[nibble] : Op_D[nibble]`. A source nibble of 0 retains the destination nibble, enabling direct transparency for 16-color HIRES4 blits without software masking.
-  * Bit 3 (`DMA_OP_NOT`): Inverts the result ($\neg(S \text{ op } D)$), yielding NOR, NAND, and XNOR with the operations above.
+  * Bit 3 (`DMA_OP_NOT`): Inverts the result (`~(S op D)`), yielding NOR, NAND, and XNOR with the operations above.
   * Bit 4 (`DMA_REV_SRC`, RC27): Reverse Source Direction (`0` = increment source address, `1` = decrement source address). Base registers specify the first byte/word to transfer.
   * Bit 5 (`DMA_REV_DST`, RC27): Reverse Destination Direction (`0` = increment destination address, `1` = decrement destination address). Base registers specify the first byte/word to transfer.
   * Bit 7 (`DMA_OP_Implemented`, read-only): In `TinyVKY_DMA_Reg_Block.v`, readback returns `{1'b1, VDMA_REG[20][6:0]}`. Bit 7 permanently reads `1` on hardware implementing logic operations (software probe before use; bit 7 permanently reads 1 on rc18/rc20+, older cores return 0 and execute plain copy).
@@ -1992,7 +2002,7 @@ In `v8_rc20` (commit `8e67004`) and Longview_rc23/rc24 (`TinyVKY_DMA_Controller.
    * After the final byte, the DMA engine holds the bus request for **8 additional 100 MHz clock cycles** (`DMA_Drain == 4'd7`) so its internal output pipeline drains completely before the CPU resumes.
    * Transfers only run during vertical blanking (~first 43 scanlines of each frame, ~8% of total frame time). Software timeouts must accommodate at least two full frames (~40 ms).
    * Fills exceeding ~130 KB terminate prematurely while reporting success; software must chunk large fills well under 100 KB.
-   * Flat 24-bit physical addressing: Bypasses the 6809 MMU ($\text{Block} \times \$2000 + \text{Offset}$).
+   * Flat 24-bit physical addressing: Bypasses the 6809 MMU (`Block × $2000 + Offset`).
    * Proven in hardware with `dmaxfer` Edition 4 (`tests/dma.asm`, `CMDS/dmaxfer`) and simulation in `wildbits-buildkit/fpga/sim/dma`.
 
 #### 4. Interrupt & Synchronization:
@@ -2009,48 +2019,62 @@ The physical base address registers (`$FEC5–$FEC7` for source, `$FEC9–$FECB`
 
 ##### 2. Address Stepping & Pointers:
 The address step per transfer cycle is determined by the double-speed / word-mode enable bit (`$FEC0[6]`, `Double_Speed_DMA`):
-$$\text{Address\_Step} = \text{Double\_Speed\_DMA} \mathbin{?} 2 : 1$$
-$$\text{Source\_Step} = \text{Reverse\_Source} \mathbin{?} -\text{Address\_Step} : +\text{Address\_Step}$$
-$$\text{Destination\_Step} = \text{Reverse\_Destination} \mathbin{?} -\text{Address\_Step} : +\text{Address\_Step}$$
+```verilog
+Address_Step     = Double_Speed_DMA ? 2 : 1;
+Source_Step      = Reverse_Source ? -Address_Step : +Address_Step;
+Destination_Step = Reverse_Destination ? -Address_Step : +Address_Step;
+```
 
 On every transfer write strobe (`Write_Strobe && DMA_Active`), the internal address pointers advance:
-$$\text{Read\_Data\_Address\_Pointer} \leftarrow \text{Read\_Data\_Address\_Pointer} + \text{Source\_Step}$$
-$$\text{Write\_Data\_Address\_Pointer} \leftarrow \text{Write\_Data\_Address\_Pointer} + \text{Destination\_Step}$$
+```verilog
+Read_Data_Address_Pointer  <= Read_Data_Address_Pointer + Source_Step;
+Write_Data_Address_Pointer <= Write_Data_Address_Pointer + Destination_Step;
+```
 
 ##### 3. 1D Linear Mode Address Math:
-In 1D linear mode, the stop addresses are computed from the base address and the 24-bit linear transfer count $\text{Count1D} = \{\text{VDMA\_Y\_Size}[7:0], \text{VDMA\_X\_Size}\}$:
-$$\text{SrcPlusCount1D} = \text{Reverse\_Source} \mathbin{?} (\text{VDMA\_Src\_Addy} - \text{Count1D}) : (\text{VDMA\_Src\_Addy} + \text{Count1D})$$
-$$\text{DstPlusCount1D} = \text{Reverse\_Destination} \mathbin{?} (\text{VDMA\_Dst\_Addy} - \text{Count1D} + \text{Address\_Step}) : (\text{VDMA\_Dst\_Addy} + \text{Count1D} - 1)$$
+In 1D linear mode, the stop addresses are computed from the base address and the 24-bit linear transfer count `Count1D = {VDMA_Y_Size[7:0], VDMA_X_Size}`:
+```verilog
+SrcPlusCount1D = Reverse_Source ? (VDMA_Src_Addy - Count1D) : (VDMA_Src_Addy + Count1D);
+DstPlusCount1D = Reverse_Destination ? (VDMA_Dst_Addy - Count1D + Address_Step) : (VDMA_Dst_Addy + Count1D - 1);
+```
 
 ##### 4. 2D Rectangular Block Mode Math:
 In 2D rectangular mode, row strides **always remain positive**. Stride addition moves down from row to row, while reverse flags control horizontal intra-row progression:
-$$\text{SrcPlusStride} = \text{VDMA\_Src\_Addy} + \text{ComputeStrideSource}[23:0]$$
-$$\text{SrcPlusStridePlusX} = \text{Reverse\_Source} \mathbin{?} (\text{SrcPlusStride} - \{8'h00, \text{VDMA\_X\_Size}\}) : (\text{SrcPlusStride} + \{8'h00, \text{VDMA\_X\_Size}\})$$
-$$\text{DstPlusStride} = \text{VDMA\_Dst\_Addy} + \text{ComputeStrideDestination}[23:0]$$
-$$\text{DstPlusStridePlusX} = \text{Reverse\_Destination} \mathbin{?} (\text{DstPlusStride} - \{8'h00, \text{VDMA\_X\_Size}\} + \text{Address\_Step}) : (\text{DstPlusStride} + \{8'h00, \text{VDMA\_X\_Size}\} - 1)$$
-Each row begins at $\text{Base} + (\text{row} \times \text{Stride})$ and reverses within that row's horizontal span.
+```verilog
+SrcPlusStride      = VDMA_Src_Addy + ComputeStrideSource[23:0];
+SrcPlusStridePlusX = Reverse_Source ? (SrcPlusStride - {8'h00, VDMA_X_Size}) : (SrcPlusStride + {8'h00, VDMA_X_Size});
+DstPlusStride      = VDMA_Dst_Addy + ComputeStrideDestination[23:0];
+DstPlusStridePlusX = Reverse_Destination ? (DstPlusStride - {8'h00, VDMA_X_Size} + Address_Step) : (DstPlusStride + {8'h00, VDMA_X_Size} - 1);
+```
+Each row begins at `Base + (row × Stride)` and reverses within that row's horizontal span.
 
 ##### 5. Termination & Completion Predicates:
 The hardware state machine evaluates transfer termination against the computed stop addresses:
 * **Source Read Completion (`Read_Reached_End`):**
-  $$\text{Double\_Speed\_DMA} \mathbin{?} (\text{Read\_Ptr}[23:1] == \text{Src\_Stop}[23:1]) : (\text{Read\_Ptr} == \text{Src\_Stop})$$
+  ```verilog
+  Double_Speed_DMA ? (Read_Ptr[23:1] == Src_Stop[23:1]) : (Read_Ptr == Src_Stop)
+  ```
 * **Destination Plain Transfer Completion (`Write_Reached_End`):**
-  $$\text{Reverse\_Destination} \mathbin{?} (\text{Write\_Ptr} \neq \text{Dst\_Stop}) : (\text{Double\_Speed\_DMA} \mathbin{?} (\text{Write\_Ptr}[23:1] < \text{Dst\_Stop}[23:1]) : (\text{Write\_Ptr} < \text{Dst\_Stop}))$$
+  ```verilog
+  Reverse_Destination ? (Write_Ptr != Dst_Stop) : (Double_Speed_DMA ? (Write_Ptr[23:1] < Dst_Stop[23:1]) : (Write_Ptr < Dst_Stop))
+  ```
 * **Destination Logic-Op / Fill Completion (`Op_Fill_Done`):**
-  $$\text{Reverse\_Destination} \mathbin{?} (\text{Write\_Ptr} == \text{Dst\_Stop} - \text{Address\_Step}) : (\text{Double\_Speed\_DMA} \mathbin{?} (\text{Write\_Ptr}[23:1] > \text{Dst\_Stop}[23:1]) : (\text{Write\_Ptr} > \text{Dst\_Stop}))$$
+  ```verilog
+  Reverse_Destination ? (Write_Ptr == Dst_Stop - Address_Step) : (Double_Speed_DMA ? (Write_Ptr[23:1] > Dst_Stop[23:1]) : (Write_Ptr > Dst_Stop))
+  ```
 
 ##### 6. Word-Mode (16-Bit) vs. Byte-Mode Semantics:
-* In double-speed / 16-bit word mode (`$FEC0[6] = 1`), reversing reverses the **word order**, stepping by $\pm 2$ bytes.
+* In double-speed / 16-bit word mode (`$FEC0[6] = 1`), reversing reverses the **word order**, stepping by ±2 bytes.
 * Word mode **preserves byte lanes** within each 16-bit word; it does NOT swap bytes within a word.
 * Word transfers require strictly **even base addresses** and **even byte counts**.
 * For a true byte-wise horizontal mirror of pixel data, software must use byte mode (`$FEC0[6] = 0`).
 
 ##### 7. Independent Bidirectional Configuration:
 Source and destination reverse flags operate completely independently:
-* Normal Copy: `Reverse_Source = 0`, `Reverse_Destination = 0` ($S[0] \to D[0], S[1] \to D[1], \dots$).
-* Source-Reversed Copy (Mirror to Destination): `Reverse_Source = 1`, `Reverse_Destination = 0` (reads backward from $S[N-1]$ down to $S[0]$, writing forward into $D[0 \dots N-1]$).
-* Destination-Reversed Copy: `Reverse_Source = 0`, `Reverse_Destination = 1` (reads forward from $S[0 \dots N-1]$, writing backward into $D[N-1 \dots 0]$).
-* Overlapping Buffer Move: Setting both flags (`Reverse_Source = 1`, `Reverse_Destination = 1`) allows safe reverse memory moves ($S[N-1 \dots 0] \to D[N-1 \dots 0]$) when the destination overlaps the source at a higher address.
+* Normal Copy: `Reverse_Source = 0`, `Reverse_Destination = 0` (`S[0] -> D[0], S[1] -> D[1], ...`).
+* Source-Reversed Copy (Mirror to Destination): `Reverse_Source = 1`, `Reverse_Destination = 0` (reads backward from `S[N-1]` down to `S[0]`, writing forward into `D[0 ... N-1]`).
+* Destination-Reversed Copy: `Reverse_Source = 0`, `Reverse_Destination = 1` (reads forward from `S[0 ... N-1]`, writing backward into `D[N-1 ... 0]`).
+* Overlapping Buffer Move: Setting both flags (`Reverse_Source = 1`, `Reverse_Destination = 1`) allows safe reverse memory moves (`S[N-1 ... 0] -> D[N-1 ... 0]`) when the destination overlaps the source at a higher address.
 
 ---
 
@@ -2221,8 +2245,7 @@ In RC25, MMU Control Register 1 (`$FFA1`) bit definitions are:
   * Reading `$FFA1` returns `{FLASHDIS.OK, VICKYDIS.OK, reg[5:4], VICKYDIS, FLASHDIS, VEC_RAM, FD_RAM}`.
 
 #### 2. Full 2,048 KB (2.0 MB) Linear SRAM Space:
-With both `FLASHDIS = 1` and `VICKYDIS = 1`, all 256 MMU blocks (`$00–$FF`) address physical system SRAM with 1:1 identity translation:
-$$\text{Physical Byte Address} = \text{Block} \times \$2000 + \text{Offset}$$
+With both `FLASHDIS = 1` and `VICKYDIS = 1`, all 256 MMU blocks (`$00–$FF`) address physical system SRAM with 1:1 identity translation (`Physical Byte Address = Block × $2000 + Offset`):
 
 ```
 +---------------------------------------------------------------------------------------------------+
@@ -2446,8 +2469,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
     * Bit 4 (`BMx_HIRES4` = `$10`): Enables HIRES4 specifically on this plane (logically OR'd with global `GFX_HIRES4`).
     * Bits 7..5 (`BMx_GROUP` = `%11100000`): Selects this plane's 16-color CLUT slice (Group 0..7).
 * **Palette Addressing:**
-  * For each 4-bit nibble, the final 8-bit palette index into the plane's designated 256-color CLUT is:
-    $$\text{Color Index} = (\text{Group} \times 16) + \text{Nibble}$$
+  * For each 4-bit nibble, the final 8-bit palette index into the plane's designated 256-color CLUT is `Color Index = (Group × 16) + Nibble`.
   * Transparency: Evaluated per 640-wide dot. If the resulting 4-bit nibble is `0`, the dot is transparent, revealing underlying layers.
 * **Pixel Bitfield Packing & Dot Ordering:**
   * Two 4-bit dots are packed per byte: **High nibble on the left** (first pixel displayed), **Low nibble on the right** (second pixel displayed).
@@ -2460,7 +2482,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 ### 9.10 2,048 KB (2.0 MB) Physical SRAM Address Decoding, FLASHDIS & VICKYDIS Modes (`$FFA1` bits 2, 3, 6, 7)
 * **Hardware Truth (Longview_rc25):** The Wildbits Jr2 features a 2 MB external SRAM chip (ISSI IS61WV102416FBLL-8BLI, 1M × 16, 8ns). Across RC25, the full **2,048 KB (2.0 MB)** is addressable by the CPU, TinyVicky, DMA, and debug port:
 * **The Longview Memory Architecture:**
-  * **Contiguous Linear Addressing:** All blocks `$00–$FF` map linearly as $\text{Physical Byte Address} = \text{Block} \times \$2000 + \text{Offset}$.
+  * **Contiguous Linear Addressing:** All blocks `$00–$FF` map linearly as `Physical Byte Address = Block × $2000 + Offset`.
   * **Relocation of Sectored I/O to `$FC–$FF`:** In Longview, Sectored I/O pages were relocated from old `$C0–$C3` to the top four blocks:
     * Block `$FC`: TinyVicky registers, Gamma LUTs, Mouse sprite, Bitmap plane regs, Line Drawer, Tile plane regs, MemText regs, 128 Sprite attributes, Text FG/BG CLUTs.
     * Block `$FD`: Dual 2 KB Font Banks (`$0000–$0FFF`) and 4 Graphics CLUTs (`$1000–$1FFF`).
@@ -2553,7 +2575,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
     * Bit 7 (Read-Only): Permanently reads `1`, advertising hardware ALU capability.
   * **MASK Nibble Transparency:** Operating across 16-bit VRAM words (or 8-bit bytes) as 4-bit nibbles: `(Op_Src[nibble] != 0) ? Op_Src[nibble] : Op_D[nibble]`.
   * **RC27 Bidirectional Addressing:**
-    * In 1D and 2D modes, address pointers advance by $\text{Source\_Step} = \text{Reverse\_Source} \mathbin{?} -\text{Step} : +\text{Step}$ and $\text{Destination\_Step} = \text{Reverse\_Destination} \mathbin{?} -\text{Step} : +\text{Step}$ where $\text{Step} = 2$ in word mode and $1$ in byte mode.
+    * In 1D and 2D modes, address pointers advance by `Source_Step = Reverse_Source ? -Step : +Step` and `Destination_Step = Reverse_Destination ? -Step : +Step` where `Step = 2` in word mode and `1` in byte mode.
     * 2D row strides remain positive; intra-row pixels are traversed backward when reverse is enabled.
     * Word mode reverses word order while preserving byte lanes within each word.
   * **RC20–RC24 Hardware Integrity Hardening:**
@@ -2662,7 +2684,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **Network Interface** | **WizFi360 Wi-Fi only** (`$FF20–$FF2A`; no W5100S/W6100 Ethernet) | `IRQ_Controller_Jr.v` & `wizfi.asm` |
 | **DIP Switches (`$FF90`)** | **Onboard 8-position DIP switch** (Bit 0: Turbo mode enable [active-low: 0 = Turbo adaptive scheduler, 1 = Stock mode], Bit 7: Gamma) | `CFP95139AJR2_Top.v` & F256Jr2 Specs |
 | **OS-9 Bannerfont** | 2,048 B pre-loaded in BRAM Font Sets 0 & 1 (unchanged through Longview_rc25) | `bannerfont.bin` / `Font_OS9_bannerfont.coe` |
-| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, slot 0 Black, slot 4 Purple, slot 7 Yellow, slot 10/$A Salmon; unchanged through Longview_rc25) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
+| **OS-9 Text Palette** | 64 B pre-loaded in BRAM (`[B, G, R, A]`, slot 0 Black, slot 4 Purple, slot 7 Yellow, slot 10 / `$0A` Salmon; unchanged through Longview_rc25) | `os9_palette.bin` / `Text_LUT_OS9_palette.coe` |
 | **Sprite H/V Mirroring (RC27)** | **Page `$FC` `$1880–$18FF` (128 bytes, 1 byte/sprite):** Bit 0 H-flip (scan start at right edge, step `-2`, byte lane swap `{VRAM[7:0], VRAM[15:8]}`), Bit 1 V-flip (inverted line access `Y1 - 1 - line_offset`), upper bits read 0 | `Jr2 Code/TinyVKY2_IO_Page0_Devices.v` & `Sprite_State_Machine.v` |
 | **DMA Reverse Directions (RC27)** | **`$FED4` Bits 4 & 5:** Bit 4 `Reverse_Source`, Bit 5 `Reverse_Destination`; base registers specify first byte/word; 2D strides positive; word mode preserves byte lanes | `TinyVKY_DMA_Controller.v` & `TinyVKY_DMA_Reg_Block.v` |
 | **SP0250 Speech Synth (RC26/RC27)**| **Fixed I/O `$FF9F`:** Write pushes LPC frame byte to 15-byte FIFO (ignored if busy); read returns status (bit 7 present, bit 0 ready: `$81` ready, `$80` busy); 3.12 MHz clock enable, 10 kHz sample rate, 8-bit DAC output scaled by 256 mixed into Left/Right PCM | `SID_OPL3_Interface.v` (`WildbitsSpeech`) & `sp0250.sv` |
@@ -2699,7 +2721,7 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 * **Hardware Truth (`source/TyVKy2K2x1_MMU_Register.v`):**
   * **`VICKYDIS` Mode (`$FFA1` bit 3):** When set to `1`, MMU Blocks `$FC–$FF` redirect to physical external SRAM at addresses `0x1F8000–0x1FFFFF` (32 KB total: Block `$FC` = `0x1F8000–0x1F9FFF`, Block `$FD` = `0x1FA000–0x1FBFFF`, Block `$FE` = `0x1FC000–0x1FDFFF`, Block `$FF` = `0x1FE000–0x1FFFFF`).
   * **`VICKYDIS.OK` Capability Flag (`$FFA1` bit 6):** Permanently reads `1` on RC25 cores, allowing software to detect hardware VICKYDIS support.
-  * **Complete 2,048 KB (2.0 MB) Linear Addressability:** Combined with `FLASHDIS = 1` (`$FFA1` bit 2), all 256 MMU blocks (`$00–$FF`) address contiguous physical SRAM (`0x000000–0x1FFFFF`) with 1:1 identity mapping: $\text{Physical Byte Address} = \text{Block} \times \$2000 + \text{Offset}$.
+  * **Complete 2,048 KB (2.0 MB) Linear Addressability:** Combined with `FLASHDIS = 1` (`$FFA1` bit 2), all 256 MMU blocks (`$00–$FF`) address contiguous physical SRAM (`0x000000–0x1FFFFF`) with 1:1 identity mapping: `Physical Byte Address = Block × $2000 + Offset`.
   * **Display & DMA Continuity:** TinyVicky display rasterization, font lookups, CLUT lookups, and hardware DMA bypass the MMU and continue running without interruption while `VICKYDIS=1`.
   * **Fixed I/O Overlays Retained:** Fixed I/O overlays at `$FExx/$FFxx` maintain priority over slot mapping.
 
@@ -2712,7 +2734,9 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * **Reset Default:** All 128 registers clear to `$00` on system reset (no mirroring).
   * **RTL Raster Engine Math:**
     * **Vertical Inversion (`V_FLIP`):** Inverts the scanline line offset within the sprite box:
-      $$\text{line\_offset}_{\text{eff}} = \text{Sprite\_Height} - 1 - \text{line\_offset}$$
+      ```verilog
+      line_offset_eff = Sprite_Height - 1 - line_offset;
+      ```
       Fetches sprite rows from bottom to top while keeping the vertical screen position unchanged.
     * **Horizontal Inversion (`H_FLIP`):** Starts scanline memory fetches at the right edge of the sprite row (`X + Line_Size - 2`), steps the memory address backward by `-2` bytes per 16-bit word fetch, and swaps the 8-bit byte lanes within each word (`{VRAM[7:0], VRAM[15:8]}`) to composite pixels from right to left.
     * **Simultaneous Inversion:** Setting both bits (`$03`) produces a combined 180-degree sprite rotation.
@@ -2725,13 +2749,15 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
     * Bit 5 (`Reverse_Destination`): Reverses address stepping of the destination operand (`0` = increment forward, `1` = decrement backward).
   * **Base Address Convention:** Base registers (`$FEC5–$FEC7` source, `$FEC9–$FECB` destination) always specify the **first byte or aligned word to transfer**, regardless of direction.
   * **Stepping & Address Math:**
-    * $\text{Address\_Step} = \text{Double\_Speed\_DMA} \mathbin{?} 2 : 1$
-    * $\text{Source\_Step} = \text{Reverse\_Source} \mathbin{?} -\text{Address\_Step} : +\text{Address\_Step}$
-    * $\text{Destination\_Step} = \text{Reverse\_Destination} \mathbin{?} -\text{Address\_Step} : +\text{Address\_Step}$
+    * `Address_Step = Double_Speed_DMA ? 2 : 1`
+    * `Source_Step = Reverse_Source ? -Address_Step : +Address_Step`
+    * `Destination_Step = Reverse_Destination ? -Address_Step : +Address_Step`
     * Linear 1D stop addresses:
-      $$\text{SrcPlusCount1D} = \text{Reverse\_Source} \mathbin{?} (\text{Src\_Base} - \text{Count1D}) : (\text{Src\_Base} + \text{Count1D})$$
-      $$\text{DstPlusCount1D} = \text{Reverse\_Destination} \mathbin{?} (\text{Dst\_Base} - \text{Count1D} + \text{Step}) : (\text{Dst\_Base} + \text{Count1D} - 1)$$
-    * 2D rectangular mode: Row strides remain positive; intra-row reversal begins at $\text{Base} + (\text{row} \times \text{Stride})$ and decrements horizontally.
+      ```verilog
+      SrcPlusCount1D = Reverse_Source ? (Src_Base - Count1D) : (Src_Base + Count1D);
+      DstPlusCount1D = Reverse_Destination ? (Dst_Base - Count1D + Step) : (Dst_Base + Count1D - 1);
+      ```
+    * 2D rectangular mode: Row strides remain positive; intra-row reversal begins at `Base + (row × Stride)` and decrements horizontally.
   * **Word-Mode Semantics:** Word mode (`Double_Speed_DMA = 1`) reverses word sequence while preserving byte lanes within each word. True byte-level horizontal mirroring requires byte mode.
   * **Independent Operation:** Source and destination can reverse independently, enabling image mirroring, reverse fills, and safe overlapping buffer moves.
 
@@ -2741,9 +2767,9 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
   * **Register Port (`$FF9F`, R/W):**
     * Write: Pushes one byte of a 15-byte LPC frame into the SP0250 FIFO. Writes while `Ready = 0` are ignored by hardware.
     * Read: Status byte: Bit 7 = 1 (speech synthesizer present), Bits 6:1 = 000000, Bit 0 = `Ready` (`1` = synthesizer ready for next byte; `0` = FIFO full, CDC handshake busy, or settling). Returns `$81` when ready, `$80` when busy.
-  * **Clocking & Sample Rate:** Runs in the 24.576 MHz audio domain with a 3.12 MHz clock enable generated by a 16-bit phase accumulator ($\text{acc} + 3120 \pmod{24576}$). Produces 1 sample every 312 clock enables = **10 kHz sample rate**.
+  * **Clocking & Sample Rate:** Runs in the 24.576 MHz audio domain with a 3.12 MHz clock enable generated by a 16-bit phase accumulator (`(acc + 3120) % 24576`). Produces 1 sample every 312 clock enables = **10 kHz sample rate**.
   * **Lattice Filter:** 15-byte LPC frame unpacked into 6 reflection filters, pitch, repeat count, and amplitude. 16-bit wrapping lattice arithmetic.
-  * **Mixing & Clamping:** 8-bit signed DAC output ($-64 \dots +63$) scaled by 256 (`{dac, 8'h00}`) and added symmetrically to both Left and Right PCM audio channels in `aclk` domain with 16-bit saturation clamping ($-32768 \dots +32767$). Clamped streams enter the master 19-bit saturation mixer in `source/sound/audio_out/audio_out.v`.
+  * **Mixing & Clamping:** 8-bit signed DAC output (-64 to +63) scaled by 256 (`{dac, 8'h00}`) and added symmetrically to both Left and Right PCM audio channels in `aclk` domain with 16-bit saturation clamping (-32768 to +32767). Clamped streams enter the master 19-bit saturation mixer in `source/sound/audio_out/audio_out.v`.
 
 ### 9.31 RC26 FIFO Read-Pop Gating with `CPU_Data_Valid_i`
 * **Hardware Truth (`source/ps2_keyboard.v`, `source/WiFi/WIFI_Interface.v`, `source/sound/midi/F256K2_MIDI_Interface.v`, `source/Flash_Memory_SPI_Interface.v`, commit `621326fe`):**
@@ -2787,12 +2813,12 @@ Traced from `nitros9project/nitros9` and parity release disk inspection:
 | **TinyVicky Bitmaps** | Bitmaps 0..2 (320x240, 256-color) in Page `$FC` at `$1000-$1013`, CLUT0–3 in Page `$FD` at `$1000–$1FFF`, 3-bit layer compositing (`& 0x07`), Text Overlay, HIRES4 mode (640×240×16c, `$FFCB`, `BMx_CTRL[4]`), fetch timeout aborts (~10–20 µs) | **Completed & Verified** | 256-color linear row fetching, 2×2 upscaling, CLUT 0..3 color lookups, 3-bit `VKY_LAYER_CTRL_0/1` layer priority resolution (ignoring bits 3/7), Text Overlay mode, and Gamma correction. Registers in Page `$FC` and CLUTs in Page `$FD`. |
 | **TinyVicky Tilemaps**| Tilemaps 0..2 with smooth scrolling in Page `$FC` at `$1100-$1123`, tilesets at `$1180–$119F`, tile index 0 empty/transparent cell handling, CPU-side readback in RC24 (`TILE_REG` at `$1100–$117F`, `TILE_DAT_REG` at `$1180–$11FF`) | **Completed & Verified** | 3 tilemap planes (TL0..TL2), 8 tile sets (TS0..TS7), 8x8 and 16x16 tile sizes, tile attributes, tile 0 empty/transparent cell handling (excluding K2-specific tile 0 ordinary rendering), 2x2 upscaling, CLUT 0..3 selection in Page `$FD`, fine X/Y smooth scrolling. Full CPU-side register readback verified. |
 | **TinyVicky Sprites** | 128 hardware sprites in Page `$FC` at `$1300-$16FF`, CLUT 0..3 selection in Page `$FD`, 4-level layer depth interleaving, fetch timeout aborts; **RC27 Sprite Mirror Registers at Page `$FC` `$1880–$18FF` (1 byte/sprite: bit 0 H-flip, bit 1 V-flip)** | **In Progress (Target RC27)** | Base 128 sprites verified. Longview_rc27 target: implement Page `$FC` `$1880–$18FF` mirror array in `m_sprite_mirror[128]`, applying horizontal right-edge scan start, `-2` step, byte-lane swap, and `Y1 - 1 - line_offset` vertical inverted line indexing in `screen_update()`. |
-| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7`, 16-bit fill even/odd byte-lane routing, byte-lane masks, **RC20–RC24 Logic Operations ($FED4) & Data Integrity Hardening**, **RC27 Bidirectional Transfer Control (`$FED4` bits 4 & 5: `Reverse_Source`, `Reverse_Destination`)** | **In Progress (Target RC27)** | Base DMA, logic ops, byte-lane alignment verified. Longview_rc27 target: parse `$FED4` bits 4/5, implementing signed source and destination stepping (`+/-1` in byte mode, `+/-2` in word mode), positive strides, and updated termination predicates. |
+| **TinyVicky DMA Controller** | 1D linear fill/copy and 2D stride rectangular blits at `$FEC0-$FED7`, 16-bit fill even/odd byte-lane routing, byte-lane masks, **RC20–RC24 Logic Operations (`$FED4`) & Data Integrity Hardening**, **RC27 Bidirectional Transfer Control (`$FED4` bits 4 & 5: `Reverse_Source`, `Reverse_Destination`)** | **In Progress (Target RC27)** | Base DMA, logic ops, byte-lane alignment verified. Longview_rc27 target: parse `$FED4` bits 4/5, implementing signed source and destination stepping (`+/-1` in byte mode, `+/-2` in word mode), positive strides, and updated termination predicates. |
 | **SP0250 LPC Speech Synthesizer** | General Instrument SP0250 digital LPC speech synthesizer at fixed I/O `$FF9F` (shared K2/Jr2, enabled on Jr2 in RC26/RC27); 15-byte FIFO, 3.12 MHz clock enable, 10 kHz sample rate, 8-bit DAC output scaled by 256 mixed into Left/Right PCM with 16-bit signed saturation clamping | **In Progress (Target RC27)** | Longview_rc27 target: instantiate `sp0250_device` in `wbjr2` clocked at 3,120,000 Hz, mapped at `$FF9F` (write pushes LPC frame byte when Ready=1; read returns status `$81` ready, `$80` busy), mixing into Left/Right PCM stream. |
 | **Audio Synthesizers & Codecs** | Consolidated Fixed I/O Sound Decode exclusively at `$FF91–$FF9F` (PSG Left/Both/Right, OPL3 Bank 0/1, SID Selector/Data, **Dual 16-bit PCM Left/Right & Status**, **SP0250 Speech at `$FF9F`**) + WM8776 CODEC + SAM2695 MIDI + VS1053b MP3 Decoder + Dual SN76489, Dual MOS6581, Yamaha YMF262 (OPL3), **19-bit master summation saturation mixer** in `audio_out.v`. Legacy Page `$C4` tap eliminated | **Completed & Verified (RC25) / In Progress (RC27)** | Stereo sound subsystem: Yamaha YMF262 (14.318181 MHz), dual SN76489 PSGs (3.579545 MHz), dual MOS6581 SIDs (1.022727 MHz), fixed 44.1 kHz stream rate with linear resampler. Exclusive fixed I/O registers at `$FF91–$FF9F` route to synthesis chips, PCM DACs, and SP0250 speech synthesizer. |
 | **Dual 16-Bit Stereo Software PCM**| Dual 16-bit signed PCM sound engine at `$FF9A–$FF9E` (`WildbitsPCM`): `$FF9A/$FF9C` high bytes, `$FF9B/$FF9D` low byte commit strobes, `$FF9E` Ready status (bit 0); CDC synchronization to 24.576 MHz audio domain; writes while `Ready=0` discarded; stream flush on commit; SP0250 speech mixed into Left/Right PCM | **Completed & Verified (RC25)** | Software-timed PCM engine, CDC handshake, 19-bit summation saturation mixer, and stream flushing on low-byte commit strobes verified in MAME. |
 | **LFSR Random Generator** | 16-bit Xilinx XAPP052 pseudo-random number generator at `$FE04–$FE06` | **Completed & Verified** | Seed load (`$FE04–$FE05`), Control/Status (`$FE06` Enable, Seed_DV, `LFSR_Done` flag). |
-| **PCB ID & Chip Version** | PCB ID ("A0") and TinyVicky Chip Version (`$FE08–$FE0F`) | **Completed & Verified** | Verified readback: `$FE08`='A', `$FE09`='0', `$FE0A`=$11, `$FE0B`=$00, `$FE0C`=$00, `$FE0D`=$02, `$FE0E`=$09, `$FE0F`=$95. Verified NitrOS-9 boot banner displays `PCBID A0 (Jr2) TnyVky 950902000011`. |
+| **PCB ID & Chip Version** | PCB ID ("A0") and TinyVicky Chip Version (`$FE08–$FE0F`) | **Completed & Verified** | Verified readback: `$FE08`='A', `$FE09`='0', `$FE0A`=`$11`, `$FE0B`=`$00`, `$FE0C`=`$00`, `$FE0D`=`$02`, `$FE0E`=`$09`, `$FE0F`=`$95`. Verified NitrOS-9 boot banner displays `PCBID A0 (Jr2) TnyVky 950902000011`. |
 | **Optical Keyboard Decode** | Optical Keyboard decode space `$FE10–$FE1F` | **Completed & Verified** | Decoded to return constant `$55` matching `DataOut_CS_K2_KEYBOARD = 8'h55`. |
 
 ### 10.2 Resolved Emulator Parity Revisions
@@ -2924,7 +2950,7 @@ Based on the release of authoritative firmware core **`wildbits_jr2_6809_Longvie
 
 | Subsystem | Longview_rc25 Hardware / Firmware Change | Status in MAME Emulator | Implementation & Verification Details |
 | :--- | :--- | :--- | :--- |
-| **2,048 KB Physical SRAM, FLASHDIS & VICKYDIS** | Blocks `$00–$FF` map linearly as $\text{Block} \times \$2000$. Max-RAM FLASHDIS mode (`$FFA1` bit 2) remaps Blocks `$40–$9F` to SRAM (`0x080000–0x13FFFF`), creating 252 blocks = **2,016 KB SRAM**. RC25 VICKYDIS mode (`$FFA1` bit 3) remaps Blocks `$FC–$FF` to physical SRAM (`0x1F8000–0x1FFFFF`), completing the full 256 blocks = **2,048 KB (2.0 MB) unbroken SRAM pool**. Bit 6 reads 1 (`VICKYDIS.OK`); Bit 7 reads 1 (`FLASHDIS.OK`). Blocks `$C0–$C6` reclaimed as ordinary SRAM. | **Completed & Verified in MAME** | Implemented 2,048 KB contiguous physical SRAM allocation in `src/mame/wildbits/wildbits_jr2.cpp`. Remaps Flash (`$40–$7F`) and Cartridge (`$80–$9F`) to SRAM when `FLASHDIS = 1`. Remaps Blocks `$FC–$FF` to physical SRAM when `VICKYDIS = 1`. `$FFA1` readback returns bits 7 and 6 set to 1 (`FLASHDIS.OK`, `VICKYDIS.OK`). LineDraw memory tap bypasses block `$FC` when `VICKYDIS = 1`. |
+| **2,048 KB Physical SRAM, FLASHDIS & VICKYDIS** | Blocks `$00–$FF` map linearly as `Block × $2000`. Max-RAM FLASHDIS mode (`$FFA1` bit 2) remaps Blocks `$40–$9F` to SRAM (`0x080000–0x13FFFF`), creating 252 blocks = **2,016 KB SRAM**. RC25 VICKYDIS mode (`$FFA1` bit 3) remaps Blocks `$FC–$FF` to physical SRAM (`0x1F8000–0x1FFFFF`), completing the full 256 blocks = **2,048 KB (2.0 MB) unbroken SRAM pool**. Bit 6 reads 1 (`VICKYDIS.OK`); Bit 7 reads 1 (`FLASHDIS.OK`). Blocks `$C0–$C6` reclaimed as ordinary SRAM. | **Completed & Verified in MAME** | Implemented 2,048 KB contiguous physical SRAM allocation in `src/mame/wildbits/wildbits_jr2.cpp`. Remaps Flash (`$40–$7F`) and Cartridge (`$80–$9F`) to SRAM when `FLASHDIS = 1`. Remaps Blocks `$FC–$FF` to physical SRAM when `VICKYDIS = 1`. `$FFA1` readback returns bits 7 and 6 set to 1 (`FLASHDIS.OK`, `VICKYDIS.OK`). LineDraw memory tap bypasses block `$FC` when `VICKYDIS = 1`. |
 | **Dual 16-Bit Stereo Software-Timed PCM Subsystem** | Dedicated fixed sound registers `$FF9A–$FF9E` (`WildbitsPCM` in `SID_OPL3_Interface.v`): `$FF9A` Left High byte, `$FF9B` Left Low byte & commit strobe, `$FF9C` Right High byte, `$FF9D` Right Low byte & commit strobe, `$FF9E` Ready status (bit 0), `$FF9F` reserved. Signed 16-bit format (`$0000` = silence). Writes while `Ready = 0` are discarded. Software-timed pacing. Master mixer in `audio_out.v` sums SID, PSG, OPL3, PCM in 19-bit signed accumulator clamped to 17-bit intermediate range (`-65536` to `+65535`) and delivered over 16-bit I2S to WM8776 DAC. | **Completed & Verified in MAME** | Discrete PCM registers implemented at `$FF9A–$FF9E` in `wbjr2`. Staging high bytes and low-byte commit strobes implemented with `Ready` bit handshake. Summed as fourth stereo stream in master audio mixer with saturation clamping to 16-bit range. Stream flush on commit eliminates aliased clicking. |
 | **PS/2 Controller Hardening & Packet Framing** | In `F256_Keyboard_And_Mouse.v`, write decoding is filtered by `CPU_A_i[3:1] == 3'b000` (`$FE50` and `$FE51` only; `$FE52–$FE5F` dropped). Hardware verifies start=0, stop=1, and odd parity with bad-byte discard. Sticky channel error flags in `PS2_STAT` (`$FE54[3:2]`) cleared only by reset or strobing `KCLR` (`$FE50[4]`) / `MCLR` (`$FE50[5]`). `F256_PS2_Framer` groups Set 2 and 3-byte mouse packets (sync bit 3 verification) with 20 ms gap watchdog timeout (`GAP_TIMEOUT = 503500` clocks) and atomic FIFO commit. | **Completed & Verified in MAME** | PS/2 controller emulation in `wbjr2` filters writes to `$FE50–$FE51` only, ignoring writes to `$FE52–$FE5F`. Emulates sticky error flags in `PS2_STAT[3:2]`, and packet framer for mouse and keyboard packets with 20 ms gap timeout and atomic FIFO commit when enabled via `$FE50[7:6]`. |
 | **Sectored I/O Relocation to Blocks `$FC–$FF`** | Sectored I/O moved from old `$C0–$C3` to Blocks `$FC–$FF` (`MMU_Entry[7:2] == 6'b111111`): `$FC` VICKY registers & sprite attributes, `$FD` Font banks & 4 Graphics CLUTs, `$FE` Text RAM (4,800 B), `$FF` Color RAM (4,800 B). Old `$C4–$C6` eliminated. | **Completed & Verified in MAME** | Sectored I/O address decoding in `wbjr2` maps MMU entries targeting `$FC–$FF` to VICKY, Font/CLUT, Text RAM, and Color RAM respectively. Legacy `$C0–$C6` sectored handling removed and reclaimed as system SRAM. |
@@ -3009,8 +3035,7 @@ This subsection establishes the formal design requirements for Phase 3 implement
 * **Compositor Updates in `screen_update()`:**
   When rendering sprite `i` on scanline `scan_y`:
   * Fetch mirror byte `flags = m_sprite_mirror[i]`.
-  * If `flags & 0x02` (`V_FLIP`): line offset within the sprite box is inverted:
-    $$\text{line} = (\text{height} - 1) - \text{line\_offset}$$
+  * If `flags & 0x02` (`V_FLIP`): line offset within the sprite box is inverted (`line = (height - 1) - line_offset`).
   * If `flags & 0x01` (`H_FLIP`): horizontal pixel sampling within the scanline is reversed:
     For horizontal pixel `x` from `0` to `width - 1`, the pixel color is sampled from coordinate `(width - 1) - x` of the sprite line buffer.
   * If both bits are set (`0x03`), both transformations apply simultaneously.
@@ -3031,10 +3056,10 @@ This subsection establishes the formal design requirements for Phase 3 implement
   * `src_step = m_dma_rev_src ? -step : +step;`
   * `dst_step = m_dma_rev_dst ? -step : +step;`
   * **1D Linear:** Base addresses `m_dma_src` and `m_dma_dst` are used directly as starting pointers; pointers advance by `src_step` and `dst_step` per byte/word.
-  * **2D Rectangular:** Row stride remains positive; for each row $r$ ($0 \le r < \text{Y\_Size}$):
-    * Row source start $= \text{Src\_Base} + (r \times \text{Src\_Stride})$
-    * Row destination start $= \text{Dst\_Base} + (r \times \text{Dst\_Stride})$
-    * Intra-row pointers step by `src_step` and `dst_step` for $\text{X\_Size}$ bytes.
+  * **2D Rectangular:** Row stride remains positive; for each row `r` (`0 <= r < Y_Size`):
+    * Row source start = `Src_Base + (r * Src_Stride)`
+    * Row destination start = `Dst_Base + (r * Dst_Stride)`
+    * Intra-row pointers step by `src_step` and `dst_step` for `X_Size` bytes.
   * In 16-bit word mode, word order reverses while preserving the 16-bit word byte lanes `{high, low}`.
 
 #### 5. General Instrument SP0250 LPC Speech Synthesizer:
@@ -3059,7 +3084,7 @@ This subsection establishes the formal design requirements for Phase 3 implement
     }
     ```
 * **Audio Stream Mixing:**
-  The mono audio output of `sp0250` is scaled and summed into both Left and Right PCM audio channels in `sound_stream_update()`, saturation-clamped to 16-bit signed range ($-32768 \dots +32767$) prior to entering the master 19-bit audio accumulator.
+  The mono audio output of `sp0250` is scaled and summed into both Left and Right PCM audio channels in `sound_stream_update()`, saturation-clamped to 16-bit signed range (-32768 to +32767) prior to entering the master 19-bit audio accumulator.
 
 #### 6. RC26 FIFO Read-Pop Gating:
 * Reading PS/2, WizFi, and MIDI FIFOs is qualified with CPU data valid checking to prevent multiple pops during extended MMU bus states.
